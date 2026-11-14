@@ -1,0 +1,28 @@
+project:
+  name: Pravah
+  team: team12
+
+fuzzball:
+  version: "4.3.1"
+  context: default
+
+storage:
+  provider: vast
+  provisioner: team12
+  volume_name: Pravah-Dataset
+
+  mount_path: /data
+
+  persistent: true
+
+  owner_uid: 100033
+  owner_gid: 100053
+
+  permissions: "0750"
+
+directories:
+  raw: /data/raw
+  processed: /data/processed
+  manifests: /data/manifests
+  models: /data/models
+  outputs: /data/outputs

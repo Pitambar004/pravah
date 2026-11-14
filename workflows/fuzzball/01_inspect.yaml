@@ -1,0 +1,46 @@
+version: v4
+
+volumes:
+  dataset:
+    use: team12
+    name: Pravah-Dataset
+
+jobs:
+  inspect-storage:
+
+    image:
+      uri: docker://python:3.11-slim
+
+    mounts:
+      /data:
+        volume: dataset
+
+    script: |
+      #!/bin/sh
+      set -eu
+
+      echo "================================="
+      echo "PRAVAH VAST STORAGE INSPECTION"
+      echo "================================="
+
+      echo "Current user:"
+      id
+
+      echo "Storage permissions:"
+      ls -ld /data
+
+      echo "Storage capacity:"
+      df -h /data
+
+      echo "Dataset contents:"
+      ls -lah /data
+
+      echo "Inspection complete."
+
+    resource:
+      cpu:
+        cores: 1
+        affinity: NUMA
+
+      memory:
+        size: 1GiB
