@@ -1,8 +1,8 @@
 """Safe, bounded single-file downloader with streamed SHA256 and failed status."""
-from pathlib import Path
 import hashlib
 import os
 import time
+from pathlib import Path
 
 import httpx
 
@@ -35,11 +35,11 @@ def download_file(url: str, destination: str, max_bytes: int = 2_000_000_000,
                         sha.update(block)
                         out.write(block)
                 if expected is not None and int(expected) != size:
-                    raise IOError("Incomplete download (content-length mismatch)")
+                    raise OSError("Incomplete download (content-length mismatch)")
             os.replace(temporary, target)
             return {"status": "downloaded_unaudited", "path": str(target),
                     "bytes": size, "sha256": sha.hexdigest(), "raster_open_status": "not_tested"}
-        except (httpx.HTTPError, ValueError, IOError, OSError) as exc:
+        except (httpx.HTTPError, ValueError, OSError) as exc:
             last_error = type(exc).__name__ + ": " + str(exc)
             temporary.unlink(missing_ok=True)
             if attempt < retries:

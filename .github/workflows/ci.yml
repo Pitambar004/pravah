@@ -11,6 +11,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install -e '.[dev]'
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: python -m pip install -e '.[full]'
+      - run: ruff check app/ tests/ src/
       - run: pytest -q

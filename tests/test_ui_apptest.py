@@ -2,6 +2,8 @@
 from pathlib import Path
 
 import pytest
+
+pytest.importorskip("streamlit", reason="Streamlit required for AppTest suite")
 from streamlit.testing.v1 import AppTest
 
 HOME_PATH = (Path(__file__).parent.parent / "app" / "Home.py").resolve()

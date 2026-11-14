@@ -1,4 +1,6 @@
-import torch
+import pytest
+
+torch = pytest.importorskip("torch", reason="PyTorch required for U-Net unit test")
 
 from pravah.ml.unet import MiniUNet
 

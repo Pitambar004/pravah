@@ -1,4 +1,9 @@
 """Tests for UI components — metric card and Folium map generation."""
+import pytest
+
+pytest.importorskip("streamlit", reason="Streamlit required for UI tests")
+pytest.importorskip("folium", reason="Folium required for map tests")
+
 from app.components.map_view import create_folium_map
 from app.components.metric_card import render_metric_card
 from app.fixtures.synthetic_sample import (

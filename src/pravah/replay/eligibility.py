@@ -1,6 +1,7 @@
 """Strict historical availability gate: no data leakage across cutoff."""
+from collections.abc import Mapping
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 
 def parse_time(value: str | datetime | None) -> datetime | None:
