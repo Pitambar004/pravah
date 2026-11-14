@@ -1,147 +1,138 @@
-"""GPU Performance — Multi-Node Cluster Scaling & Hardware Benchmarks."""
+"""Compute & Performance — verified compute environment and benchmark results only."""
+from __future__ import annotations
+
+import altair as alt
 import streamlit as st
 
 from app.components.empty_state import render_empty_state
 from app.components.layout import (
-    render_page_header,
+    card,
+    html,
+    kv_list,
+    render_badge,
     render_section_header,
 )
 from app.components.metric_card import render_metric_card
+from app.context import AppContext, render_page_frame
 from app.data_loader import RunArtifacts
+from app.theme import TOKENS
 
 
-def render_gpu_section(artifacts: RunArtifacts):
-    """Render the standardized GPU scaling and cluster performance page."""
-    render_page_header(
-        title="GPU Performance & Cluster Benchmarks",
-        subtitle="Distributed scientific AI inference benchmark measuring compute speedup and parallel efficiency across Team 12's Lenovo ThinkStation PGX / NVIDIA GB10 hardware.",
-        badge="CIQ Fuzzball v4.3.1" if artifacts.benchmark else "Awaiting Sunday Hardware",
-        badge_variant="accent" if artifacts.benchmark else "neutral",
+def runtime_chart(t1: float, t2: float) -> alt.Chart:
+    """Single-series horizontal bar chart of compute-only runtime."""
+    data = alt.Data(values=[
+        {"Configuration": "1 node", "Seconds": t1},
+        {"Configuration": "2 nodes", "Seconds": t2},
+    ])
+    base = alt.Chart(data).encode(
+        y=alt.Y("Configuration:N", sort=None, title=None,
+                axis=alt.Axis(labelColor=TOKENS["text_secondary"], labelFontSize=12, ticks=False, domain=False, labelPadding=8)),
+        x=alt.X("Seconds:Q", title="Compute time (s)",
+                axis=alt.Axis(labelColor=TOKENS["text_muted"], titleColor=TOKENS["text_muted"], titleFontWeight="normal",
+                              gridColor=TOKENS["border_subtle"], domain=False, ticks=False, tickCount=5)),
+        tooltip=[alt.Tooltip("Configuration:N"), alt.Tooltip("Seconds:Q", format=".2f")],
     )
+    bars = base.mark_bar(color=TOKENS["accent"], height=22, cornerRadiusEnd=4)
+    labels = base.mark_text(align="left", dx=6, color=TOKENS["text_secondary"], fontSize=12).encode(
+        text=alt.Text("Seconds:Q", format=".2f"))
+    return (bars + labels).properties(height=120).configure(background="transparent").configure_view(stroke=None)
 
-    bench = artifacts.benchmark
-    if not bench:
-        render_empty_state(
-            title="Awaiting Verified Cluster Benchmarks (Sunday 9:00 AM CT)",
-            description="The hackathon hardware access window opens Sunday at 09:00 CT. Benchmark metrics will automatically appear here once the identical tile manifest is executed on 1 node and 2 distinct GB10 nodes.",
-            action_command="python scripts/benchmark.py --one outputs/run_1node/benchmark.json --two outputs/run_2node/benchmark.json",
-            expected_files=["outputs/<run_id>/benchmark.json", "benchmarks/benchmarks.csv"],
-            badge="Scheduled Hardware Allocation",
-        )
-        _render_hardware_spec_card()
-        return
 
-    # 1. Standardized 4-Card Benchmark Row
-    speedup = bench.get("speedup_compute", 0)
-    efficiency = bench.get("parallel_efficiency", 0)
-    tiles = bench.get("tile_count", 0)
-    t1 = bench.get("one_node_seconds")
-    t2 = bench.get("two_node_seconds")
-    nodes = bench.get("node_ids", [])
-    cuda = bench.get("cuda_verified", False)
+def render_compute_section(ctx: AppContext) -> None:
+    render_page_frame(
+        ctx,
+        "Compute & Performance",
+        "Compute & Performance",
+        "Compute environment, processing runs and multi-node inference benchmarks. "
+        "Only measured values from benchmark artifacts are shown.",
+    )
+    a: RunArtifacts = ctx.artifacts
+    bench = a.benchmark or {}
+    meta = a.observed_metadata or {}
 
-    c1, c2, c3, c4 = st.columns(4)
-
-    with c1:
-        render_metric_card(
-            label="Compute Speedup",
-            value=f"{speedup:.2f}×" if speedup else "—",
-            subtext="T(1 Node) / T(2 Nodes)",
-            badge="Scaling Factor",
-            badge_variant="success" if speedup >= 1.5 else "warning",
-        )
-
-    with c2:
-        render_metric_card(
-            label="Parallel Efficiency",
-            value=f"{efficiency * 100:.1f}%" if efficiency else "—",
-            subtext="Speedup / 2 Nodes",
-            badge="Efficiency",
-            badge_variant="success" if efficiency >= 0.8 else "warning",
-        )
-
-    with c3:
-        render_metric_card(
-            label="Workload Equivalence",
-            value=tiles,
-            unit="tiles (512×512)",
-            subtext="Identical manifest SHA256",
-            badge="Matched Grid",
-            badge_variant="accent",
-        )
-
-    with c4:
-        render_metric_card(
-            label="Physical Nodes",
-            value=len(set(nodes)) if nodes else 2,
-            unit="distinct PGX boxes",
-            subtext=", ".join(nodes) if nodes else "NVIDIA GB10",
-            badge="CUDA Engine" if cuda else "CPU Test",
-            badge_variant="success" if cuda else "neutral",
-        )
-
-    st.markdown("<div style='height: 0.5rem;'></div>", unsafe_allow_html=True)
-
-    # 2. Timing Breakdown & Workload Verification Invariants
-    col_l, col_r = st.columns([3, 2])
-
-    with col_l:
-        render_section_header("Measured Inference Time (Compute-Only)", "Excludes container setup and volume mount overhead.")
-
-        if t1 and t2:
-            st.bar_chart(
-                {"Execution Time (s)": {"Single Node": t1, "Two Nodes (DDP/Parallel)": t2}},
-                horizontal=True,
-                color="#38BDF8",
-            )
-            st.markdown(
-                f"""
-                <div style="font-size: 0.775rem; color: #94A3B8; margin-top: 0.25rem;">
-                    1 Node: <code>{t1:.2f}s</code> &rarr; 2 Nodes: <code>{t2:.2f}s</code> · 
-                    <strong style="color: #34D399;">{(1 - t2 / t1) * 100:.1f}% execution duration reduction</strong>
-                </div>
-                """,
-                unsafe_allow_html=True,
+    col_env, col_runs = st.columns([2, 3])
+    with col_env:
+        render_section_header("Compute environment", "Planned target; verified only by a benchmark artifact")
+        nodes = bench.get("node_ids") or []
+        cuda = bench.get("cuda_verified")
+        env_state = render_badge("Fixture", "warning") if a.is_synthetic else (
+            render_badge("Verified run", "success") if bench else render_badge("Not yet verified", "neutral"))
+        html(card("Target cluster", kv_list([
+            ("Hardware (planned)", "2× Lenovo ThinkStation PGX · NVIDIA GB10"),
+            ("Orchestration (planned)", "CIQ Fuzzball 4.3.1"),
+            ("Access window", "Team plan: Sun 15 Nov 2026, 09:00 CT"),
+            ("Node IDs", ", ".join(nodes) if nodes else "Not recorded"),
+            ("CUDA verified", "Yes" if cuda is True else "No" if cuda is False else "Not recorded"),
+            ("Workflow status", "Recorded in benchmark.json" if bench else "No workflow run recorded"),
+        ], mono_keys=("Node IDs",)), trailing=env_state))
+    with col_runs:
+        render_section_header("Processing runs", "From observed_metadata.json and benchmark.json")
+        if meta or bench:
+            st.dataframe(
+                [{
+                    "Run ID": meta.get("run_id") or a.run_id,
+                    "Model": meta.get("model") or meta.get("model_name") or "Not recorded",
+                    "Input scene": meta.get("source_raster") or "Not recorded",
+                    "Tiles": bench.get("tile_count") or meta.get("tile_count"),
+                    "Status": "Synthetic fixture" if a.is_synthetic else "Completed (artifact present)",
+                    "2-node compute (s)": bench.get("two_node_seconds"),
+                }],
+                hide_index=True,
+                width="stretch",
             )
         else:
-            st.info("Execution durations not detailed in raw benchmark summary.")
+            render_empty_state("No processing runs recorded", "Run metadata appears after tile inference and stitching.",
+                               expected_files=["observed_metadata.json"], icon_name="pending_actions", compact=True)
 
-        render_section_header("Workload Equivalence & Cryptographic Verification", "Invariants enforced by scripts/benchmark.py.")
+    render_section_header("Multi-node performance", "Compute-only time for an identical tile manifest on 1 vs 2 nodes")
+    if not bench:
+        render_empty_state(
+            "Benchmark results will appear after a verified compute run",
+            "Speedup and efficiency are only shown when the same tile manifest and model hash have been executed on "
+            "one node and on two distinct nodes with CUDA verified.",
+            action_command="python scripts/benchmark.py --one <1-node benchmark.json> --two <2-node benchmark.json>",
+            expected_files=["outputs/<run_id>/benchmark.json"],
+            icon_name="speed",
+        )
+        return
 
-        verification_rows = [
-            {"Verification Property": "Tile Manifest Hash", "Recorded Value": str(bench.get("tile_manifest_sha256", ""))[:18] + "…", "Result": "Identical Manifest"},
-            {"Verification Property": "Model Checkpoint Hash", "Recorded Value": str(bench.get("model_sha256", ""))[:18] + "…", "Result": "Identical Weights"},
-            {"Verification Property": "Tile Count Equivalence", "Recorded Value": f"{tiles} tiles", "Result": "Identical Workload"},
-            {"Verification Property": "Hardware Isolation", "Recorded Value": ", ".join(nodes) if nodes else "2 physical nodes", "Result": "Distinct Sockets"},
-            {"Verification Property": "CUDA Execution Engine", "Recorded Value": "torch.cuda active", "Result": "Hardware Accelerated" if cuda else "CPU Smoke Test"},
-        ]
-        st.dataframe(verification_rows, use_container_width=True, hide_index=True)
+    t1, t2 = bench.get("one_node_seconds"), bench.get("two_node_seconds")
+    speedup, eff = bench.get("speedup_compute"), bench.get("parallel_efficiency")
+    src = ctx.source_note("benchmark.json")
+    cols = st.columns(4)
+    specs = [
+        {"label": "Single-node time", "icon_name": "timer", "value": t1, "unit": "s", "subtext": src},
+        {"label": "Two-node time", "icon_name": "timer", "value": t2, "unit": "s", "subtext": src},
+        {"label": "Speedup", "icon_name": "speed", "value": None if speedup is None else f"{speedup:.2f}×",
+             "subtext": "T(1 node) / T(2 nodes)"},
+        {"label": "Parallel efficiency", "icon_name": "percent", "value": None if eff is None else f"{eff * 100:.0f}%",
+             "subtext": "Speedup / 2 nodes"},
+    ]
+    for col, spec in zip(cols, specs, strict=True):
+        with col:
+            render_metric_card(**spec)
 
-    with col_r:
-        _render_hardware_spec_card()
+    col_chart, col_ver = st.columns([3, 2])
+    with col_chart:
+        if t1 and t2:
+            st.altair_chart(runtime_chart(t1, t2), width="stretch")
+            thr1, thr2 = bench.get("throughput_one_node_tiles_per_sec"), bench.get("throughput_two_node_tiles_per_sec")
+            if thr1 and thr2:
+                st.caption(f"Throughput: {thr1:.2f} → {thr2:.2f} tiles/s · {bench.get('note', 'compute-only, not wall-clock')}")
+        else:
+            render_empty_state("Runtimes not recorded", "benchmark.json does not include per-configuration times.",
+                               badge=None, icon_name="timer_off", compact=True)
+    with col_ver:
+        html(card("Workload equivalence", kv_list([
+            ("Tile manifest SHA-256", str(bench.get("tile_manifest_sha256", "—"))[:16] + "…"),
+            ("Model SHA-256", str(bench.get("model_sha256", "—"))[:16] + "…"),
+            ("Tile count", str(bench.get("tile_count", "—"))),
+            ("Distinct nodes", str(len(set(bench.get("node_ids") or []))) if bench.get("node_ids") else "Not recorded"),
+        ], mono_keys=("Tile manifest SHA-256", "Model SHA-256"))))
 
-        with st.expander("Raw Benchmark Artifact JSON"):
-            st.json(bench)
+    with st.expander("Execution details · raw benchmark.json"):
+        st.json(bench)
 
 
-def _render_hardware_spec_card():
-    """Render details of the target GB10 cluster platform."""
-    render_section_header("Target Cluster Specifications", "Hardware topology.")
-    st.markdown(
-        """
-        <div class="pv-card">
-            <div style="display: flex; flex-direction: column; gap: 0.45rem; font-size: 0.8rem;">
-                <div><strong>Systems:</strong> 2× Lenovo ThinkStation PGX</div>
-                <div><strong>GPU Architecture:</strong> NVIDIA GB10 (Blackwell generation)</div>
-                <div><strong>Host Processor:</strong> ARM64 (aarch64) high-throughput cores</div>
-                <div><strong>Orchestration:</strong> CIQ Fuzzball v4.3.1 Local AI Stack</div>
-                <div><strong>Task Partitioning:</strong> Deterministic spatial tile manifests</div>
-                <div><strong>Inference Mode:</strong> Independent data-parallel (non-blocking)</div>
-            </div>
-            <div style="margin-top: 0.75rem; padding-top: 0.5rem; border-top: 1px solid #263244; font-size: 0.75rem; color: #64748B;">
-                Hardware access opens Sunday Nov 15, 09:00 CT.
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+# Backwards-compatible name
+render_gpu_section = render_compute_section

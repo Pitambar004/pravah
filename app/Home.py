@@ -1,170 +1,98 @@
 # ruff: noqa: N999
-"""PRAVAH — Satellite-Derived Flood Evidence & Distributed Inference Platform."""
+"""PRAVAH application shell: page config, theme, sidebar, routing."""
 import sys
+from html import escape
 from pathlib import Path
 
-# Ensure repository root is on sys.path
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 import streamlit as st
 
+from app.components.layout import html, render_callout, render_footer
+from app.context import build_context
 from app.data_loader import discover_available_runs, load_run_artifacts
-from app.theme import apply_theme
+from app.theme import TOKENS, apply_theme
 
-# 1. Page Configuration
+APP_VERSION = "0.1.0"
+
 st.set_page_config(
-    page_title="Pravah — Flood Intelligence",
-    page_icon="🌊",
+    page_title="PRAVAH · Flood Intelligence",
+    page_icon=":material/water:",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",
 )
-
-# 2. Inject Unified Design System CSS
 apply_theme()
 
-# 3. Persistent Sidebar Navigation
+# Pages (route names kept stable; titles follow the design brief)
+PAGES = [
+    st.Page("views/overview.py", title="Overview", icon=":material/space_dashboard:", url_path="overview", default=True),
+    st.Page("views/flood_map.py", title="Flood Intelligence Map", icon=":material/map:", url_path="map"),
+    st.Page("views/replay.py", title="Historical Replay", icon=":material/history:", url_path="replay"),
+    st.Page("views/exposure.py", title="Infrastructure Exposure", icon=":material/apartment:", url_path="exposure"),
+    st.Page("views/compute.py", title="Compute & Performance", icon=":material/memory:", url_path="compute"),
+    st.Page("views/methodology.py", title="Sources & Methodology", icon=":material/menu_book:", url_path="methodology"),
+]
+current = st.navigation(PAGES, position="hidden")
+
+_MARK = (
+    '<svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">'
+    f'<rect x="0.5" y="0.5" width="27" height="27" rx="7.5" fill="{TOKENS["surface_raised"]}" stroke="{TOKENS["border"]}"/>'
+    f'<path d="M6 10.5c3-2.2 5.2 2.2 8 0s5-2.2 8 0" stroke="{TOKENS["accent"]}" stroke-width="1.7" stroke-linecap="round"/>'
+    f'<path d="M6 15c3-2.2 5.2 2.2 8 0s5-2.2 8 0" stroke="{TOKENS["accent"]}" stroke-opacity=".65" stroke-width="1.7" stroke-linecap="round"/>'
+    f'<path d="M6 19.5c3-2.2 5.2 2.2 8 0s5-2.2 8 0" stroke="{TOKENS["accent"]}" stroke-opacity=".35" stroke-width="1.7" stroke-linecap="round"/>'
+    "</svg>"
+)
+
 with st.sidebar:
-    # Wordmark & Brand Header
-    st.markdown(
-        """
-        <div style="padding-bottom: 0.75rem; border-bottom: 1px solid #263244; margin-bottom: 1rem;">
-            <div style="font-size: 1.25rem; font-weight: 700; color: #F1F5F9; letter-spacing: -0.02em; display: flex; align-items: center; gap: 0.5rem;">
-                <span>🌊</span> Pravah
-            </div>
-            <div style="font-size: 0.725rem; color: #94A3B8; font-weight: 500; margin-top: 0.2rem;">
-                Scientific Flood Intelligence & Distributed AI
-            </div>
-            <div style="font-size: 0.685rem; color: #64748B; font-family: 'JetBrains Mono', monospace; margin-top: 0.35rem;">
-                Rasuwa, Nepal · Aug 26, 2026
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    html(
+        f'<div class="pv-brand">{_MARK}<div><div class="pv-brand-name">PRAVAH'
+        '<span class="pv-brand-deva" lang="ne">प्रवाह</span></div>'
+        '<div class="pv-brand-sub">Flood Intelligence Platform</div></div></div>'
     )
+    html('<div class="pv-nav-label">Workspace</div>')
+    for page in PAGES:
+        st.page_link(page, label=page.title, icon=page.icon)
 
-    # Clean Navigation
-    NAV_PAGES = [
-        "Overview",
-        "Flood Evidence Map",
-        "Historical Replay",
-        "Infrastructure Exposure",
-        "GPU Performance",
-        "Sources & Methodology",
-    ]
-
-    page = st.radio(
-        "Navigation",
-        NAV_PAGES,
-        index=0,
-        label_visibility="collapsed",
-    )
-
-    st.markdown("<hr>", unsafe_allow_html=True)
-
-    # Run Artifact Selector
-    st.markdown(
-        '<div style="font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #64748B; margin-bottom: 0.5rem;">Active Execution Run</div>',
-        unsafe_allow_html=True,
-    )
-
+    html('<div class="pv-side-divider"></div><div class="pv-nav-label">Data source</div>')
     runs = discover_available_runs("outputs")
     if runs:
-        chosen = st.selectbox("Select Run", runs, index=0, label_visibility="collapsed")
+        chosen = st.selectbox("Run", runs, index=0, help="Run folders discovered under outputs/")
         run_folder = f"outputs/{chosen}"
     else:
-        run_folder = st.text_input("Output Directory", "outputs/latest", label_visibility="collapsed")
-
-    # Demo Fixtures Toggle
+        run_folder = st.text_input("Run folder", "outputs/latest", help="No run folders found under outputs/")
     use_demo = st.toggle(
-        "UI Demo Fixtures",
+        "Show synthetic fixtures",
         value=not bool(runs),
-        help="Loads clearly labeled [SYNTHETIC TEST FIXTURE] datasets to verify UI layouts when outputs are awaiting execution.",
+        help="Loads clearly labelled synthetic test fixtures to preview layouts when no run artifacts exist. "
+        "Fixtures are never real observations.",
     )
 
-    # Load artifacts
-    artifacts = load_run_artifacts(run_folder, allow_synthetic_fallback=use_demo)
+artifacts = load_run_artifacts(run_folder, allow_synthetic_fallback=use_demo)
+ctx = build_context(artifacts)
 
-    # Status Pill
-    if artifacts.is_synthetic:
-        status_html = '<span class="pv-badge pv-badge-warning">🧪 Demo Fixtures</span>'
-    elif artifacts.has_any_artifacts:
-        status_html = '<span class="pv-badge pv-badge-success">● Live Artifacts</span>'
-    else:
-        status_html = '<span class="pv-badge pv-badge-neutral">○ Awaiting Run</span>'
-
-    st.markdown(
-        f"""
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem; font-size: 0.75rem; color: #64748B;">
-            <span>Status</span>
-            {status_html}
-        </div>
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.25rem; font-size: 0.72rem; color: #64748B;">
-            <span>Run ID</span>
-            <span style="font-family: 'JetBrains Mono', monospace; color: #94A3B8;">{artifacts.run_id}</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
+with st.sidebar:
+    label, variant = ctx.data_status
+    html(
+        f'<div class="pv-side-meta"><span>Status</span><span class="pv-badge pv-badge-{variant}"><span class="dot"></span>{label}</span></div>'
+        f'<div class="pv-side-meta"><span>Run</span><span class="pv-mono" title="{escape(artifacts.run_id)}">{escape(artifacts.run_id)}</span></div>'
+        f'<div class="pv-side-footer"><strong>Team 12</strong> · CIQ Hackathon 2026<br>v{APP_VERSION} · retrospective prototype</div>'
     )
 
-    st.markdown("<hr>", unsafe_allow_html=True)
-
-    # Footer Metadata
-    st.markdown(
-        """
-        <div style="font-size: 0.72rem; color: #64748B; line-height: 1.45;">
-            <strong>Team 12</strong> · CIQ Local AI Hackathon<br>
-            2× Lenovo PGX / NVIDIA GB10
-        </div>
-        """,
-        unsafe_allow_html=True,
+if artifacts.errors:
+    render_callout(
+        "Some artifacts in this run could not be read: " + escape("; ".join(artifacts.errors)),
+        title="Artifact read errors",
+        variant="error",
     )
-
-# 4. Global Scientific Alert Banner (if Demo Fixture is active)
 if artifacts.is_synthetic:
-    st.markdown(
-        """
-        <div class="pv-callout pv-callout-warning" style="margin-top: 0.5rem;">
-            <strong>Development Fixture Mode Active:</strong> Current views display synthetic test fixtures for UI/UX verification.
-            These geometries and benchmark metrics are not authentic disaster observations.
-        </div>
-        """,
-        unsafe_allow_html=True,
+    render_callout(
+        "All geometries, counts, scenes and benchmark numbers on these pages are synthetic test fixtures used to "
+        "verify the interface. They are not observations of the Rasuwa event.",
+        title="Synthetic fixture mode",
+        variant="warning",
     )
 
-# 5. Route to Selected Section
-if page == "Overview":
-    from app.sections.overview import render_overview_section
-    render_overview_section(artifacts)
-elif page == "Flood Evidence Map":
-    from app.sections.flood_map import render_flood_map_section
-    render_flood_map_section(artifacts)
-elif page == "Historical Replay":
-    from app.sections.replay import render_replay_section
-    render_replay_section(artifacts)
-elif page == "Infrastructure Exposure":
-    from app.sections.exposure import render_exposure_section
-    render_exposure_section(artifacts)
-elif page == "GPU Performance":
-    from app.sections.gpu_benchmarks import render_gpu_section
-    render_gpu_section(artifacts)
-elif page == "Sources & Methodology":
-    from app.sections.methodology import render_methodology_section
-    render_methodology_section(artifacts)
-
-# 6. Global Scientific Integrity Footer
-st.markdown("<hr>", unsafe_allow_html=True)
-st.markdown(
-    """
-    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; color: #64748B; flex-wrap: wrap; gap: 0.5rem;">
-        <div>
-            <strong>Pravah</strong> · Scientific AI & Multi-Node Inference Prototype · Team 12
-        </div>
-        <div>
-            Retrospective evidence only · Not an operational emergency warning system · EPSG:32645 UTM 45N
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+current.run()
+render_footer()

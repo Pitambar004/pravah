@@ -194,6 +194,20 @@ def load_run_artifacts(
 
 def load_replay_catalog(manifest_path: Path | str | None = None, allow_synthetic: bool = True) -> list[dict[str, Any]]:
     """Load satellite and dataset assets for Historical Replay audit."""
+    items, _ = load_replay_catalog_with_source(manifest_path, allow_synthetic=allow_synthetic)
+    return items
+
+
+def load_replay_catalog_with_source(
+    manifest_path: Path | str | None = None, allow_synthetic: bool = False
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Load the replay catalog and report where it came from.
+
+    Returns ``(items, source)`` where ``source`` is the manifest path, the string
+    ``"synthetic_fixture"``, or ``None`` when nothing is available. Synthetic assets
+    are only returned when ``allow_synthetic`` is True, so the UI can never show
+    fixture scenes as real observations without labelling them.
+    """
     paths_to_check = []
     if manifest_path:
         paths_to_check.append(Path(manifest_path))
@@ -207,7 +221,7 @@ def load_replay_catalog(manifest_path: Path | str | None = None, allow_synthetic
         if p.exists():
             data, _ = safe_read_json(p)
             if isinstance(data, list) and data:
-                return data
+                return data, str(p)
             elif isinstance(data, dict) and "features" in data:
                 # STAC FeatureCollection format
                 items = []
@@ -223,8 +237,8 @@ def load_replay_catalog(manifest_path: Path | str | None = None, allow_synthetic
                         "provider": "Copernicus STAC",
                         "description": f.get("id")
                     })
-                return items
+                return items, str(p)
 
     if allow_synthetic:
-        return SYNTHETIC_REPLAY_ASSETS
-    return []
+        return SYNTHETIC_REPLAY_ASSETS, "synthetic_fixture"
+    return [], None
