@@ -1,132 +1,112 @@
-"""Infrastructure Exposure — Spatial Overlays & Vulnerability Analysis."""
+"""Infrastructure Exposure — mapped intersections between water extent and infrastructure."""
+from __future__ import annotations
+
 import streamlit as st
 
 from app.components.empty_state import render_empty_state
 from app.components.layout import (
+    card,
+    html,
+    kv_list,
     render_callout,
-    render_page_header,
     render_section_header,
 )
+from app.components.map_view import build_layers, render_map_workspace
 from app.components.metric_card import render_metric_card
-from app.data_loader import RunArtifacts
+from app.context import AppContext, render_page_frame
 
 
-def render_exposure_section(artifacts: RunArtifacts):
-    """Render the standardized Infrastructure Exposure page."""
-    render_page_header(
-        title="Infrastructure Exposure",
-        subtitle="Calculates spatial intersections between model-derived optical water extents and OpenStreetMap infrastructure footprints (EPSG:32645 metric calculations).",
-        badge="Metric Projected: EPSG:32645" if artifacts.exposure_summary else None,
-        badge_variant="neutral",
+def exposure_rows(exp: dict) -> list[dict]:
+    """Category table rows. Missing values stay None (rendered as blank), never zero."""
+    unavailable = set(exp.get("unavailable_fields") or [])
+
+    def status(key: str, value) -> str:
+        if key in unavailable or value is None:
+            return "Not evaluated"
+        return "Evaluated"
+
+    water = exp.get("water_area_m2")
+    roads = exp.get("road_length_m_intersecting")
+    pop = exp.get("modelled_population_estimate")
+    return [
+        {"Category": "Mapped water extent", "Measure": "Area", "Value": None if water is None else round(water / 10_000, 2),
+         "Unit": "ha", "Status": status("water_area_m2", water), "Source": "Model-derived mask"},
+        {"Category": "Buildings", "Measure": "Footprints intersecting", "Value": exp.get("building_footprints_intersecting"),
+         "Unit": "footprints", "Status": status("buildings", exp.get("building_footprints_intersecting")), "Source": "OpenStreetMap"},
+        {"Category": "Roads", "Measure": "Length intersecting", "Value": None if roads is None else round(roads / 1000, 2),
+         "Unit": "km", "Status": status("roads", roads), "Source": "OpenStreetMap"},
+        {"Category": "Bridges", "Measure": "Tagged features intersecting", "Value": exp.get("bridge_tagged_features_intersecting"),
+         "Unit": "features", "Status": status("bridges", exp.get("bridge_tagged_features_intersecting")), "Source": "OpenStreetMap"},
+        {"Category": "Resident population", "Measure": "Estimated within overlay", "Value": pop,
+         "Unit": "people (modelled)", "Status": status("population", pop), "Source": "WorldPop (if ingested)"},
+    ]
+
+
+def render_exposure_section(ctx: AppContext) -> None:
+    render_page_frame(
+        ctx,
+        "Infrastructure Exposure",
+        "Infrastructure Exposure",
+        "Mapped intersections between the model-derived water extent and OpenStreetMap infrastructure, "
+        "computed in a metric projection (EPSG:32645).",
     )
-
-    exp = artifacts.exposure_summary
+    a = ctx.artifacts
+    exp = a.exposure_summary
     if not exp:
         render_empty_state(
-            title="Awaiting Infrastructure Exposure Summary",
-            description="Exposure metrics require a stitched water mask and OpenStreetMap infrastructure layers (buildings, roads, bridges).",
-            action_command="python scripts/exposure.py --mask outputs/<run_id>/observed_water.tif",
-            expected_files=["outputs/<run_id>/exposure_summary.json", "outputs/<run_id>/exposure.geojson"],
+            "No exposure summary for this run",
+            "Exposure metrics need a stitched water mask and OSM infrastructure layers (buildings, roads, bridges).",
+            action_command="python scripts/exposure.py --mask outputs/<run_id>/observed_water.tif ...",
+            expected_files=["exposure_summary.json", "exposure.geojson"],
+            icon_name="apartment",
         )
         return
 
-    # Critical Scientific Callout
     render_callout(
-        message="Spatial intersection with OpenStreetMap footprints indicates inundation exposure or proximity, NOT confirmed structural destruction, bridge collapse, or human casualties.",
-        title="Methodological Principle (Exposure ≠ Damage)",
+        "Intersection with mapped water indicates <strong>potential exposure</strong> only. It is not confirmed damage, "
+        "collapse or casualties.",
+        title="Exposure is not damage",
         variant="warning",
     )
 
-    # 1. Standardized KPI Metrics Row (4 Cards)
-    water = exp.get("water_area_m2")
-    buildings = exp.get("building_footprints_intersecting")
-    roads_m = exp.get("road_length_m_intersecting")
-    bridges = exp.get("bridge_tagged_features_intersecting")
-    pop = exp.get("modelled_population_estimate")
+    roads = exp.get("road_length_m_intersecting")
+    src = ctx.source_note("exposure_summary.json")
+    cols = st.columns(4)
+    specs = [
+        {"label": "Buildings in mapped extent", "icon_name": "apartment", "value": exp.get("building_footprints_intersecting"),
+             "unit": "footprints", "subtext": src},
+        {"label": "Road length in mapped extent", "icon_name": "road", "value": None if roads is None else roads / 1000,
+             "unit": "km", "subtext": src},
+        {"label": "Bridges in mapped extent", "icon_name": "bridge", "value": exp.get("bridge_tagged_features_intersecting"),
+             "unit": "features", "subtext": src},
+        {"label": "Estimated resident population", "icon_name": "groups", "value": exp.get("modelled_population_estimate"),
+             "unit": "modelled", "empty_label": "Not computed", "subtext": "Modelled estimate, not a headcount"},
+    ]
+    for col, spec in zip(cols, specs, strict=True):
+        with col:
+            render_metric_card(**spec)
 
-    c1, c2, c3, c4 = st.columns(4)
+    col_map, col_side = st.columns([3, 2])
+    with col_map:
+        render_section_header("Exposure map", "Water extent with study boundary. Infrastructure feature layers appear when exported.")
+        render_map_workspace(build_layers(a, show_retrospective=False), height=520, mode="full", synthetic=a.is_synthetic)
+    with col_side:
+        render_section_header("Source coverage", "Inputs and invariants used by scripts/exposure.py")
+        unavailable = exp.get("unavailable_fields") or []
+        html(card(None, kv_list([
+            ("Mask artifact", exp.get("mask_artifact", "—")),
+            ("Mask class", exp.get("source_type", "—")),
+            ("Valid pixels", f"{exp['valid_pixel_count']:,}" if isinstance(exp.get("valid_pixel_count"), int) else "—"),
+            ("OSM snapshot", exp.get("osm_snapshot_timestamp", "Not recorded")),
+            ("Metric CRS", "EPSG:32645 (UTM 45N)"),
+            ("Not evaluated", ", ".join(unavailable) if unavailable else "None reported"),
+        ], mono_keys=("Mask artifact", "Mask class"))))
 
-    with c1:
-        render_metric_card(
-            label="Water Extent",
-            value=f"{water / 10000:.1f}" if water else "0.0",
-            unit="ha",
-            subtext=f"{water:,.0f} m² total" if water else "No water mapped",
-            badge="Optical Mask",
-            badge_variant="accent",
-        )
-
-    with c2:
-        render_metric_card(
-            label="Building Footprints",
-            value=buildings,
-            unit="structures" if buildings is not None else None,
-            subtext="Intersecting polygons",
-            badge="OSM Overlap" if buildings is not None else "Missing",
-            badge_variant="warning" if buildings else "neutral",
-        )
-
-    with c3:
-        render_metric_card(
-            label="Road Alignment",
-            value=f"{roads_m / 1000:.2f}" if roads_m is not None else None,
-            unit="km" if roads_m is not None else None,
-            subtext=f"{roads_m:,.0f} m intersecting" if roads_m is not None else "Layer missing",
-            badge="Road Network" if roads_m is not None else "Missing",
-            badge_variant="warning" if roads_m else "neutral",
-        )
-
-    with c4:
-        render_metric_card(
-            label="Bridge Spans",
-            value=bridges,
-            unit="features" if bridges is not None else None,
-            subtext="Tagged bridge features",
-            badge="High Impact" if bridges and bridges > 0 else "None",
-            badge_variant="error" if bridges and bridges > 0 else "neutral",
-        )
-
-    st.markdown("<div style='height: 0.5rem;'></div>", unsafe_allow_html=True)
-
-    # 2. Detailed Exposure Audit & Geospatial Invariants
-    col_l, col_r = st.columns([3, 2])
-
-    with col_l:
-        render_section_header("Methodological Breakdown & Coverage Audit", "Inventory of evaluated asset layers.")
-
-        audit_rows = [
-            {"Asset Category": "Water Mask Artifact", "Recorded Value": exp.get("mask_artifact", "observed_water.tif"), "Status": "Valid Invariant"},
-            {"Asset Category": "Valid Observed Pixels", "Recorded Value": f"{exp.get('valid_pixel_count', 0):,} pixels", "Status": "Valid Invariant"},
-            {"Asset Category": "OSM Extract Snapshot", "Recorded Value": exp.get("osm_snapshot_timestamp", "2026-01-01"), "Status": "Pre-Event Baseline"},
-            {"Asset Category": "Modelled Resident Population", "Recorded Value": f"~{pop:,} residents" if pop else "Not computed (WorldPop unindexed)", "Status": "Contextual Reference"},
-        ]
-        st.dataframe(audit_rows, use_container_width=True, hide_index=True)
-
-        unavail = exp.get("unavailable_fields", [])
-        if unavail:
-            render_callout(
-                message=f"The following feature types were omitted or unindexed during this run: {', '.join(unavail)}.",
-                title="Layer Availability Notice",
-                variant="info",
-            )
-
-    with col_r:
-        render_section_header("Geospatial Invariants", "Scientific contracts enforced by scripts/exposure.py.")
-
-        st.markdown(
-            f"""
-            <div class="pv-card">
-                <div style="display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.8rem;">
-                    <div><strong>Projected Coordinate System:</strong> <code style="color: #38BDF8;">EPSG:32645</code></div>
-                    <div><strong>Spatial Units:</strong> Meters & Square Meters</div>
-                    <div><strong>Source Mask Type:</strong> <code>{exp.get('source_type', 'model_inferred_water')}</code></div>
-                    <div><strong>Deduplication:</strong> Unique OSM ID tracking</div>
-                    <div><strong>Zero vs Missing:</strong> Evaluated layers with zero overlap report 0, not null.</div>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        with st.expander("Raw Exposure Summary JSON"):
-            st.json(exp)
+    render_section_header("Category breakdown", "Values are mapped intersections. Blank means not evaluated — not zero.")
+    st.dataframe(
+        exposure_rows(exp),
+        hide_index=True,
+        width="stretch",
+    )
+    with st.expander("Raw exposure_summary.json"):
+        st.json(exp)
