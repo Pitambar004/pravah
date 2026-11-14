@@ -1,0 +1,49 @@
+version: v4
+
+volumes:
+  dataset:
+    use: team12
+    name: Pravah-Dataset
+
+jobs:
+  initialize-storage:
+
+    image:
+      uri: docker://python:3.11-slim
+
+    mounts:
+      /data:
+        volume: dataset
+
+    script: |
+      #!/bin/sh
+      set -eu
+
+      echo "Initializing Pravah dataset"
+
+      mkdir -p /data/raw/sentinel1
+      mkdir -p /data/raw/sentinel2
+      mkdir -p /data/raw/labels
+
+      mkdir -p /data/processed/train
+      mkdir -p /data/processed/validation
+      mkdir -p /data/processed/test
+
+      mkdir -p /data/manifests
+
+      mkdir -p /data/models/checkpoints
+
+      mkdir -p /data/outputs/predictions
+      mkdir -p /data/outputs/evaluation
+
+      echo "Storage initialized"
+
+      ls -lah /data
+
+    resource:
+      cpu:
+        cores: 1
+        affinity: NUMA
+
+      memory:
+        size: 1GiB

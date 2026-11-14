@@ -1,0 +1,31 @@
+dataset:
+  name: Pravah Flood Detection Dataset
+
+  root: /data
+
+  satellite_sources:
+    sentinel1:
+      path: /data/raw/sentinel1
+      type: SAR
+
+    sentinel2:
+      path: /data/raw/sentinel2
+      type: optical
+
+  labels:
+    path: /data/raw/labels
+
+  processed:
+    train: /data/processed/train
+    validation: /data/processed/validation
+    test: /data/processed/test
+
+  manifests:
+    directory: /data/manifests
+    training_pairs: /data/manifests/s2_pairs.json
+
+  model:
+    checkpoints: /data/models/checkpoints
+
+  inference:
+    output: /data/outputs/predictions
