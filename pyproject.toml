@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pravah"
+version = "0.1.0"
+description = "Evidence-aware satellite water segmentation and distributed compute experiments"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.26", "rasterio>=1.3", "shapely>=2.0", "geopandas>=0.14",
+    "pandas>=2.0", "pyproj>=3.5", "httpx>=0.25"
+]
+
+[project.optional-dependencies]
+ml = ["torch>=2.2"]
+catalog = ["pystac-client>=0.7"]
+ui = ["streamlit>=1.35", "folium>=0.16"]
+dev = ["pytest>=8", "ruff>=0.6"]
+full = ["torch>=2.2", "pystac-client>=0.7", "streamlit>=1.35", "folium>=0.16", "pytest>=8", "ruff>=0.6"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
