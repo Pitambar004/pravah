@@ -23,72 +23,50 @@ To run the full automated test suite:
 pytest -v
 ```
 
-All 39 tests across data contracts, temporal replay gating, geospatial summaries, ML baseline, UI loaders, and Streamlit AppTest pass cleanly in ~2.5 seconds.
+Last recorded run (14 Nov 2026, Python 3.14, Streamlit 1.67, no torch): `pytest -q` → 47 passed, 1 skipped (U-Net test, torch not installed); `ruff check app/ tests/ src/` → clean.
 
 ---
 
-## 2. Visual Design System Specifications
+## 2. Design System
 
-The application uses an enterprise-grade SaaS design language inspired by Linear, Vercel, and Stripe Dashboard, engineered specifically for scientific geospatial intelligence.
+All tokens live in `app/theme.py` (`TOKENS`) and are emitted as `--pv-*` CSS custom properties; `.streamlit/config.toml` mirrors the base colours and sets Inter / JetBrains Mono. Pages must not hardcode colours or spacing.
 
-### Color Tokens
-- **Application Background:** `#0B1120`
-- **Sidebar & Elevated Surfaces:** `#111827`
-- **Card Backgrounds:** `#151F30`
-- **Borders:** `#263244` (Subtle 1px solid)
-- **Primary Text:** `#F1F5F9` (High-contrast, clean legibility)
-- **Secondary Text:** `#94A3B8` (Descriptions and body)
-- **Muted Text:** `#64748B` (Labels, metadata, and timestamps)
-- **Primary Accent:** `#38BDF8` (Sky blue for water and primary active states)
-- **Success:** `#34D399` (Pre-cutoff eligible, verified runs, CUDA active)
-- **Warning:** `#FBBF24` (Retrospective reveals, demo fixture alerts, potential overlap)
-- **Error:** `#FB7185` (Excluded unknown availability, bridge overlaps)
+- **Surfaces:** app `#090E18`, sidebar `#0D1420`, surface `#111B2A`, raised `#172335`, hover `#1D2B3E`, borders `#263448` / `#1C293A`.
+- **Text:** primary `#F3F6FA`, secondary `#A4B2C5`, muted `#718198`, disabled `#536176`.
+- **Semantics:** cyan `#38BDF8` = primary/active/model-derived water; green `#34D399` = available/verified; amber `#FBBF24` = warnings, potential exposure, retrospective reference; red `#FB7185` = errors/excluded; purple `#A78BFA` = hypothetical scenarios. Status is never colour-only (labels, marker shapes, icons).
+- **Type:** page title 28/36, section 16/24, card 14/22, body 14/22, caption 12/18; tabular numerals for metrics.
+- **Spacing / radius:** 8px scale (4–48); controls 8px, cards 12px, large containers 16px.
+- **Icons:** Material Symbols Rounded only (native to Streamlit navigation; loaded in the map iframe too).
+- **Breakpoints:** ≤640px mobile (drawer nav, stacked cards), 641–1180px tablet (2-up metrics, map/side panels stack), desktop beyond.
 
-### Typography Scale
-- **Page Heading:** 28px, font-weight 600, letter-spacing -0.02em (`.pv-page-title`)
-- **Section Heading:** 18px, font-weight 600, letter-spacing -0.01em
-- **Card Title / Metric Label:** 12px, font-weight 500, uppercase, letter-spacing 0.05em (`.pv-metric-label`)
-- **Metric Value:** 26px, font-weight 700 (`.pv-metric-value`)
-- **Body & Tables:** 13–14px, font-weight 400, line-height 1.5
-- **Monospace:** `JetBrains Mono` / system monospace for hashes, timestamps, and commands
-
----
-
-## 3. Modular Architecture & Design System Primitives
+## 3. Architecture
 
 ```text
 app/
-├── Home.py                      # Persistent sidebar, brand header, run selector & router
-├── theme.py                     # Design tokens & global CSS stylesheet
-├── data_loader.py               # Robust, exception-safe artifact reader for outputs/<run_id>/
+├── Home.py            # shell: page config, theme, sidebar (brand, nav, data source), st.navigation routing
+├── context.py         # AppContext (artifacts + replay catalog + provenance), shared topbar/page header
+├── theme.py           # tokens + global stylesheet
+├── data_loader.py     # exception-safe artifact reader; load_replay_catalog_with_source()
+├── views/             # one thin route file per page (URL paths: /, /map, /replay, /exposure, /compute, /methodology)
 ├── components/
-│   ├── layout.py                # Standardized page headers, section headers, badges & callouts
-│   ├── metric_card.py           # Reusable KPI metric card primitive (.pv-metric-card)
-│   ├── empty_state.py           # Standardized awaiting / empty state card (.pv-empty-state)
-│   └── map_view.py              # Geospatial Folium map with dark-mode legend & controls
-├── sections/
-│   ├── overview.py              # Section 1: Mission Overview, 5 KPI cards, corridor map preview
-│   ├── flood_map.py             # Section 2: Full-canvas Flood Evidence Map with layer controls
-│   ├── replay.py                # Section 3: Historical Replay with ISO 8601 pre-cutoff temporal gating
-│   ├── exposure.py              # Section 4: Infrastructure Exposure & OSM feature intersection
-│   ├── gpu_benchmarks.py        # Section 5: GPU scaling, 1-node vs 2-node comparison & Fuzzball specs
-│   └── methodology.py           # Section 6: AI models, satellite sources, licensing & provenance export
-└── fixtures/
-    └── synthetic_sample.py      # Clearly labeled [SYNTHETIC TEST FIXTURE] for offline evaluation
+│   ├── layout.py      # html(), icon(), badge, topbar, page/section headers, callout, card, kv_list, status_list, footer
+│   ├── metric_card.py # MetricCard — None renders "Not available"/"Awaiting processing", never 0
+│   ├── empty_state.py # standard empty/awaiting state
+│   ├── map_view.py    # Leaflet map workspace (layers panel, opacity, basemaps, feature detail panel, legend) — client-side, no reruns
+│   └── timeline.py    # evidence timeline SVG + evidence cards (strict vs retrospective)
+├── sections/          # page renderers, each takes AppContext
+└── fixtures/          # synthetic fixtures (only when the sidebar toggle is on; always labelled)
 ```
 
----
+## 4. Integrity rules enforced in the UI
 
-## 4. Section Design Highlights
-
-1. **Overview:** Standardized 5-card metric row (`Inferred Water`, `Buildings Exposed`, `Roads Exposed`, `Bridge Overlaps`, `Multi-Node Scaling`), 3:2 split with corridor map canvas and verified pipeline checklist.
-2. **Flood Evidence Map:** Full-width map canvas (`#263244` border), compact top toolbar, unified Folium palette, on-map legend (`#151F30` background), and attribute table.
-3. **Historical Replay:** Cutoff toolbar with disaster milestone presets, 3 summary cards (`Eligible`, `Retrospective`, `Excluded`), and clean tabbed tables enforcing strict temporal eligibility (`acquired_at_utc <= cutoff AND available_at_utc <= cutoff`).
-4. **Infrastructure Exposure:** Same standardized metric card primitive as Overview, prominent `exposure != damage` callout, and layer audit table.
-5. **GPU Performance:** Speedup and parallel efficiency cards, clean execution time chart (`st.bar_chart`), cryptographic workload equivalence verification table, and an honest awaiting state for Sunday's GB10 cluster window.
-6. **Sources & Methodology:** Tabbed documentation covering Prithvi EO 2.0 300M, Team 12 U-Net, Copernicus/UNOSAT/OSM/WorldPop licensing, sensor limitations, and single-click JSON provenance export.
-
----
+1. Synthetic fixtures load only when "Show synthetic fixtures" is on; every page then shows a fixture banner and the map shows a fixture chip. With fixtures off, the replay catalog no longer falls back to synthetic scenes.
+2. Processing status is derived from files actually present; nothing is pre-marked "audited" or "enforced".
+3. Strict replay never renders assets acquired or made available after the cutoff; unknown availability is excluded (`pravah.replay.eligibility`).
+4. Map layers without an artifact (admin boundaries, rivers, imagery preview, infrastructure features, scenarios) are listed but disabled with the reason.
+5. Compute page shows planned hardware as *planned*; speedup/efficiency only appear from `benchmark.json`.
+6. Exposure is labelled "potential exposure"; population is "modelled estimate, not a headcount".
+7. The sources table does not assert licence terms — each must be verified at source.
 
 ## 5. Teammate Handoff & Expected Artifacts
 

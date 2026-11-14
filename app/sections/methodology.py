@@ -1,176 +1,153 @@
-"""Sources & Methodology — Provenance, Model Cards, Attribution, and Scientific Limitations."""
+"""Sources & Methodology — documentation, provenance and limitations."""
+from __future__ import annotations
+
 import json
 
 import streamlit as st
 
-from app.components.layout import (
-    render_page_header,
-    render_section_header,
-)
-from app.data_loader import RunArtifacts
+from app.components.layout import card, html, kv_list, render_badge
+from app.context import CASE_STUDY, AppContext, render_page_frame
+
+SOURCES = [
+    {"Source": "Sentinel-2 MSI Level-1C", "Role": "Optical model input (6 bands)", "Evidence type": "Observed",
+     "Provider": "Copernicus Data Space Ecosystem",
+     "Link": "https://documentation.dataspace.copernicus.eu/APIs/STAC.html"},
+    {"Source": "Sen1Floods11 hand-labelled subset", "Role": "Baseline training / validation labels", "Evidence type": "Reference labels",
+     "Provider": "Cloud to Street et al.", "Link": "https://github.com/cloudtostreet/Sen1Floods11"},
+    {"Source": "Prithvi-EO-2.0-300M-TL-Sen1Floods11", "Role": "Pretrained water segmentation", "Evidence type": "Model",
+     "Provider": "IBM / NASA", "Link": "https://huggingface.co/ibm-nasa-geospatial/Prithvi-EO-2.0-300M-TL-Sen1Floods11"},
+    {"Source": "OpenStreetMap extract", "Role": "Buildings, roads, bridges for exposure", "Evidence type": "Context",
+     "Provider": "OpenStreetMap contributors", "Link": "https://www.openstreetmap.org/copyright"},
+    {"Source": "UNOSAT mudflow / rockflow extent", "Role": "Retrospective comparison only", "Evidence type": "Retrospective reference",
+     "Provider": "UNITAR-UNOSAT / UNESCO IHP-WINS",
+     "Link": "https://ihp-wins.unesco.org/en/dataset/nepal-satellite-detected-mudflow-and-rockflow-extent-nepal"},
+    {"Source": "WorldPop population grid", "Role": "Optional modelled resident population", "Evidence type": "Context (modelled)",
+     "Provider": "WorldPop", "Link": "https://www.worldpop.org/"},
+]
 
 
-def render_methodology_section(artifacts: RunArtifacts):
-    """Render the standardized Sources & Methodology documentation interface."""
-    render_page_header(
-        title="Sources & Scientific Methodology",
-        subtitle="Audited catalog manifests, model card architectures, licensing attribution, and inherent sensor uncertainties.",
-        badge="Scientific Audit",
-        badge_variant="neutral",
+def render_methodology_section(ctx: AppContext) -> None:
+    render_page_frame(
+        ctx,
+        "Sources & Methodology",
+        "Sources & Methodology",
+        "How PRAVAH produces its evidence, which sources it relies on, and where its results stop being reliable.",
+    )
+    t_method, t_sources, t_models, t_replay, t_limits, t_prov = st.tabs(
+        ["Methodology", "Data sources", "Models", "Replay rules", "Limitations", "Provenance"]
     )
 
-    tab_models, tab_sources, tab_limits, tab_export = st.tabs([
-        "AI Model Cards",
-        "Data Sources & Licensing",
-        "Sensor Uncertainties & Limits",
-        "Provenance Export",
-    ])
-
-    with tab_models:
-        render_section_header("Model Architecture Specifications", "Scientific models evaluated for optical water segmentation.")
-
-        col_m1, col_m2 = st.columns(2)
-
-        with col_m1:
-            st.markdown(
-                """
-                <div class="pv-card">
-                    <div class="pv-card-header">
-                        <span class="pv-card-title">Prithvi EO 2.0 300M (Fine-Tuned)</span>
-                        <span class="pv-badge pv-badge-accent">Foundation Model</span>
-                    </div>
-                    <div style="font-size: 0.8rem; color: #94A3B8; margin-bottom: 0.75rem; line-height: 1.45;">
-                        Geospatial foundation model developed by IBM Research and NASA, fine-tuned on Sen1Floods11.
-                    </div>
-                    <div style="display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.775rem;">
-                        <div><strong>Architecture:</strong> Temporal Vision Transformer (ViT-B) with U-Net Decoder</div>
-                        <div><strong>Parameter Count:</strong> ~300M parameters</div>
-                        <div><strong>Input Optical Channels (6):</strong> <code>[B2, B3, B4, B8A, B11, B12]</code></div>
-                        <div><strong>Normalization:</strong> Level 1C TOA reflectances / 10,000</div>
-                        <div><strong>License:</strong> Apache 2.0</div>
-                        <div><strong>HuggingFace ID:</strong> <code>ibm-nasa-geospatial/Prithvi-EO-2.0-300M-TL-Sen1Floods11</code></div>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-        with col_m2:
-            st.markdown(
-                """
-                <div class="pv-card">
-                    <div class="pv-card-header">
-                        <span class="pv-card-title">Team 12 Sentinel-2 Baseline U-Net</span>
-                        <span class="pv-badge pv-badge-success">Trained Baseline</span>
-                    </div>
-                    <div style="font-size: 0.8rem; color: #94A3B8; margin-bottom: 0.75rem; line-height: 1.45;">
-                        Transparent 6-channel convolutional network trained independently on the official hand-labeled Sen1Floods11 subset.
-                    </div>
-                    <div style="display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.775rem;">
-                        <div><strong>Architecture:</strong> Classical U-Net with skip connections</div>
-                        <div><strong>Parameter Count:</strong> ~1.2M parameters</div>
-                        <div><strong>Input Channels:</strong> 6 optical channels (same order as Prithvi)</div>
-                        <div><strong>Loss Function:</strong> Binary Cross-Entropy with <code>ignore_index=-1</code></div>
-                        <div><strong>Training Pipeline:</strong> CPU baseline smoke test & PyTorch 2-GPU DDP script</div>
-                        <div><strong>Verification:</strong> Unit-tested forward/backward passes passing</div>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-    with tab_sources:
-        render_section_header("Audited Source Inventory & Licensing", "Authoritative provenance for datasets.")
-
-        sources_data = [
-            {
-                "Data Source": "Sentinel-2 MSI Level 1C",
-                "Provider": "Copernicus Data Space Ecosystem (CDSE)",
-                "Spatial Resolution": "10m / 20m optical multispectral",
-                "License": "CC-BY-4.0 Copernicus Sentinel Data",
-                "Application": "Primary optical inference input for water segmentation",
-            },
-            {
-                "Data Source": "Sen1Floods11 Hand-Labeled v1.1",
-                "Provider": "Cloud to Street / NASA / Radiant Earth",
-                "Spatial Resolution": "446 512×512 hand-verified chips",
-                "License": "CC-BY-4.0",
-                "Application": "Training & validation ground truth for surface water",
-            },
-            {
-                "Data Source": "OpenStreetMap Historical Extract",
-                "Provider": "Geofabrik (2026-01-01 Snapshot)",
-                "Spatial Resolution": "Vector buildings, roads, bridges",
-                "License": "Open Database License (ODbL 1.0)",
-                "Application": "Pre-event infrastructure exposure intersections",
-            },
-            {
-                "Data Source": "UNOSAT Satellite-Detected Mud/Rockflow",
-                "Provider": "UNESCO IHP-WINS / UNITAR-UNOSAT",
-                "Spatial Resolution": "Published 2026-08-28 (DOI 10.63253/1y26ihdq)",
-                "License": "CC-BY-NC-SA 3.0 IGO",
-                "Application": "Retrospective post-event qualitative reference comparator",
-            },
-            {
-                "Data Source": "WorldPop Gridded Population Density",
-                "Provider": "WorldPop / University of Southampton",
-                "Spatial Resolution": "100m gridded resident counts",
-                "License": "CC-BY-4.0",
-                "Application": "Contextual modelled resident population in study AOI",
-            },
-        ]
-        st.dataframe(sources_data, use_container_width=True, hide_index=True)
-
-    with tab_limits:
-        render_section_header("Scientific Caveats & Methodological Uncertainties", "Transparent reporting of limitations.")
-
-        st.markdown(
-            """
-            <div class="pv-card">
-                <ol style="margin: 0; padding-left: 1.25rem; font-size: 0.8rem; color: #94A3B8; line-height: 1.6;">
-                    <li style="margin-bottom: 0.5rem;">
-                        <strong style="color: #F1F5F9;">Retrospective Evidence vs Operational Forecasting:</strong>
-                        PRAVAH produces satellite-derived water evidence after sensor acquisitions. It is not an advance forecasting or early warning system.
-                    </li>
-                    <li style="margin-bottom: 0.5rem;">
-                        <strong style="color: #F1F5F9;">Monsoon Cloud Occlusion:</strong>
-                        Optical Sentinel-2 imagery cannot image through cloud decks. Flash flood peaks obscured by cloud are masked as invalid (<code>255</code>), never zero.
-                    </li>
-                    <li style="margin-bottom: 0.5rem;">
-                        <strong style="color: #F1F5F9;">Himalayan Terrain Distortion:</strong>
-                        Steep gorge walls create severe radiometric shadows in optical data and layover/foreshortening in SAR backscatter.
-                    </li>
-                    <li style="margin-bottom: 0.5rem;">
-                        <strong style="color: #F1F5F9;">Optical Water Mask vs Sediment-Laden Debris:</strong>
-                        Himalayan flood cascades carry heavy mud and debris, which have distinct spectral signatures from clear surface water.
-                    </li>
-                    <li>
-                        <strong style="color: #F1F5F9;">Exposure Definition (Exposure &ne; Damage):</strong>
-                        Spatial overlap with building or road footprints indicates inundation exposure, not structural destruction or collapse.
-                    </li>
-                </ol>
-            </div>
-            """,
-            unsafe_allow_html=True,
+    with t_method:
+        html(
+            '<div class="pv-doc">'
+            "<h3>Pipeline</h3><ol>"
+            "<li><strong>Source audit.</strong> Candidate scenes are discovered via STAC; each records provider, product, "
+            "acquisition time, verified availability time, licence and checksum.</li>"
+            "<li><strong>Pre-processing.</strong> Sentinel-2 L1C reflectances are reordered to "
+            "<code>[B2, B3, B4, B8A, B11, B12]</code> and scaled by 1/10,000. Sentinel-1 SAR is never fed to optical models.</li>"
+            "<li><strong>Tiled inference.</strong> A deterministic tile manifest is partitioned across workers; each tile yields "
+            "water probability and a validity mask.</li>"
+            "<li><strong>Stitching.</strong> Tiles are merged into <code>observed_water.tif</code>: 1 = model-inferred water, "
+            "0 = no water, 255 = invalid (cloud, nodata, outside AOI).</li>"
+            "<li><strong>Exposure.</strong> Water polygons are intersected with OSM infrastructure in EPSG:32645 so that "
+            "areas and lengths are metric.</li>"
+            "<li><strong>Replay.</strong> Every source is gated by acquisition and verified availability time before it can "
+            "appear in a historical view.</li></ol>"
+            "<h3>Evidence vocabulary</h3>"
+            f"<p>{render_badge('Observed', 'accent')} satellite acquisitions · "
+            f"{render_badge('Model-derived', 'accent')} segmentation output · "
+            f"{render_badge('Derived exposure', 'warning')} geometric intersections · "
+            f"{render_badge('Retrospective reference', 'warning')} later products such as UNOSAT · "
+            f"{render_badge('Hypothetical scenario', 'scenario')} not observed.</p>"
+            "</div>"
         )
 
-    with tab_export:
-        render_section_header("Download Provenance Bundle", "Export machine-readable run metadata for scientific reproducibility.")
+    with t_sources:
+        st.dataframe(
+            SOURCES,
+            hide_index=True,
+            width="stretch",
+            column_config={"Link": st.column_config.LinkColumn("Link", display_text="Open source")},
+        )
+        st.caption(
+            "Licences and redistribution terms must be verified at each source before judge-facing use; this table "
+            "does not assert licence terms. Download status: "
+            + ("synthetic fixtures only." if ctx.is_synthetic else "see data/manifests/ for audited downloads.")
+        )
 
+    with t_models:
+        c1, c2 = st.columns(2)
+        with c1:
+            html(card("Prithvi-EO-2.0 300M (Sen1Floods11 fine-tune)", kv_list([
+                ("Role", "Primary pretrained water segmentation"),
+                ("Input", "Sentinel-2 L1C, 6 bands"),
+                ("Band order", "B2, B3, B4, B8A, B11, B12"),
+                ("Status", "Candidate — adapter not yet implemented"),
+                ("Model ID", "ibm-nasa-geospatial/Prithvi-EO-2.0-300M-TL-Sen1Floods11"),
+            ], mono_keys=("Model ID",)), trailing=render_badge("Pretrained", "accent")))
+        with c2:
+            html(card("Team 12 baseline U-Net", kv_list([
+                ("Role", "Transparent independent baseline"),
+                ("Input", "Same 6 optical bands"),
+                ("Loss", "BCE with ignore label −1"),
+                ("Status", "Implemented and unit-tested; not trained on real scenes"),
+                ("Code", "src/pravah/ml/unet.py"),
+            ], mono_keys=("Code",)), trailing=render_badge("Baseline", "neutral")))
+        st.caption("No accuracy metrics are reported until evaluated on held-out data with recorded splits.")
+
+    with t_replay:
+        html(
+            '<div class="pv-doc">'
+            "<h3>Eligibility rule</h3>"
+            "<p>A source is eligible at cutoff <em>C</em> only when <strong>acquired ≤ C</strong> and "
+            "<strong>verified available ≤ C</strong>. Both timestamps must be timezone-aware.</p>"
+            "<h3>Unknown availability</h3>"
+            "<p>If the publication/availability time is missing or unverified the source is <strong>excluded</strong>. "
+            "It never silently passes the strict filter.</p>"
+            "<h3>Retrospective reveal</h3>"
+            "<p>Later evidence (e.g. a post-event Sentinel-2 pass or the UNOSAT product published 28 Aug 2026) is shown only "
+            "in retrospective mode, labelled as unavailable at the cutoff, and is never used as model input for that cutoff.</p>"
+            "<p>Implementation: <code>src/pravah/replay/eligibility.py</code>.</p></div>"
+        )
+
+    with t_limits:
+        html(
+            '<div class="pv-doc"><ol>'
+            "<li><strong>Retrospective, not a forecast.</strong> PRAVAH maps evidence after acquisition; it does not predict "
+            "flood arrival or provide early warning.</li>"
+            "<li><strong>Cloud occlusion.</strong> Monsoon cloud blocks optical sensors; occluded pixels are invalid (255), "
+            "not dry.</li>"
+            "<li><strong>Terrain effects.</strong> Steep valleys cause shadow in optical data and layover in SAR.</li>"
+            "<li><strong>Debris vs water.</strong> Sediment-laden flows differ spectrally from clear water; UNOSAT mudflow "
+            "extent is a different class from model water.</li>"
+            "<li><strong>Exposure ≠ damage.</strong> Intersections indicate potential exposure only.</li>"
+            "<li><strong>Population is modelled.</strong> Gridded estimates are not headcounts of affected people.</li>"
+            "</ol></div>"
+        )
+
+    with t_prov:
+        a = ctx.artifacts
         bundle = {
             "application": "PRAVAH",
-            "version": "0.1.0",
-            "case_study": "Rasuwa-Nuwakot, Nepal (2026-08-26)",
-            "run_id": artifacts.run_id,
-            "is_synthetic": artifacts.is_synthetic,
-            "observed_metadata": artifacts.observed_metadata,
-            "exposure_summary": artifacts.exposure_summary,
-            "benchmark": artifacts.benchmark,
+            "case_study": f"{CASE_STUDY['region']} ({CASE_STUDY['event_date']})",
+            "run_id": a.run_id,
+            "is_synthetic": a.is_synthetic,
+            "replay_catalog_source": ctx.catalog_source,
+            "observed_metadata": a.observed_metadata,
+            "exposure_summary": a.exposure_summary,
+            "benchmark": a.benchmark,
+            "missing_files": a.missing_files,
         }
-
+        html(card("Run provenance", kv_list([
+            ("Run", a.run_id),
+            ("Data mode", ctx.data_status[0]),
+            ("Replay catalog", ctx.catalog_source or "None"),
+            ("Missing files", ", ".join(a.missing_files) if a.missing_files else "None"),
+        ], mono_keys=("Run",))))
         st.download_button(
-            label="⬇ Download Run Provenance JSON",
-            data=json.dumps(bundle, indent=2),
-            file_name=f"pravah_provenance_{artifacts.run_id}.json",
+            "Download provenance JSON",
+            data=json.dumps(bundle, indent=2, default=str),
+            file_name=f"pravah_provenance_{a.run_id}.json",
             mime="application/json",
+            icon=":material/download:",
         )
