@@ -67,10 +67,11 @@ _TEMPLATE = r"""<!doctype html>
 html,body{margin:0;height:100%;background:var(--bg-app);color:var(--text);font:13px/20px var(--font)}
 #wrap{position:absolute;inset:0;display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .side{position:relative;border:1px solid var(--border);border-radius:12px;overflow:hidden}
-.map{position:absolute;inset:0;background:#0b111c}
-.head{position:absolute;z-index:500;top:10px;left:10px;right:10px;display:flex;gap:8px;align-items:flex-start;
+.map{position:absolute;inset:72px 0 0;background:#0b111c}
+.head{position:absolute;z-index:500;top:0;left:0;right:0;height:72px;display:flex;gap:8px;align-items:center;
+  background:var(--surface);border-bottom:1px solid var(--border);
   pointer-events:none}
-.title{background:rgba(17,27,42,.94);border:1px solid var(--border);border-radius:10px;padding:8px 12px;max-width:100%}
+.title{padding:10px 14px;max-width:100%;overflow-wrap:anywhere}
 .title b{font-size:13px;font-weight:600}
 .title small{display:block;color:var(--text-muted);font-size:11.5px;line-height:16px}
 .badge{font-size:10.5px;padding:1px 7px;border-radius:6px;border:1px solid var(--border);margin-left:6px;
@@ -80,12 +81,19 @@ html,body{margin:0;height:100%;background:var(--bg-app);color:var(--text);font:1
 .legend label{display:flex;align-items:center;gap:8px;cursor:pointer;line-height:22px}
 .legend .off{color:var(--text-disabled);cursor:default}
 .sw{width:10px;height:10px;border-radius:3px;flex:none}
-.bm{position:absolute;z-index:600;top:10px;right:10px;display:flex;gap:4px}
-.bm button{height:26px;border-radius:7px;border:1px solid var(--border);background:rgba(23,35,53,.96);
+.bm{position:absolute;z-index:600;top:82px;left:10px;display:flex;gap:4px}
+.bm button{height:32px;border-radius:7px;border:1px solid var(--border);background:rgba(23,35,53,.96);
   color:var(--text-secondary);font:500 11px var(--font);cursor:pointer;padding:0 8px}
 .bm button[aria-pressed=true]{color:var(--accent);border-color:rgba(56,189,248,.45)}
 .leaflet-container{font:12px var(--font)}
 .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--surface-raised);color:var(--text)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media(max-width:600px){
+  #wrap{grid-template-columns:1fr;grid-template-rows:1fr 1fr}
+  .map{top:60px}.head{height:60px}.title{padding:8px 12px}
+  .title small{font-size:10px}.bm{top:68px}
+  .legend{max-height:72px;overflow:auto;font-size:11px;padding:4px 8px}
+}
 .fx{position:absolute;z-index:700;left:50%;transform:translateX(-50%);bottom:10px;background:rgba(251,191,36,.15);
   color:var(--warning);border:1px solid rgba(251,191,36,.4);border-radius:8px;padding:2px 10px;font-size:11.5px}
 </style></head><body>
@@ -106,7 +114,8 @@ CFG.sides.forEach((side, i) => {
   t.append(el('small', {}, side.subtitle));
   box.append(el('div', {class:'head'}, t));
   wrap.append(box);
-  const map = L.map(m, {zoomControl: i === 1, attributionControl: i === 1}).setView(CFG.center, 11);
+  const map = L.map(m, {zoomControl: false, attributionControl: i === 1}).setView(CFG.center, 11);
+  if (i === 1) L.control.zoom({position:'bottomright'}).addTo(map);
   const bm = CFG.basemaps[CFG.basemap];
   bases.push(L.tileLayer(bm.url, {attribution: bm.attr, maxZoom: 18}).addTo(map));
   const legend = el('div', {class:'legend'});

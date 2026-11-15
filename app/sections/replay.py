@@ -61,6 +61,7 @@ def render_replay_section(ctx: AppContext) -> None:
         "Historical Replay",
         "Step back to a moment in time and see only the evidence that was actually available then. "
         "Later observations stay hidden unless you switch to retrospective reveal.",
+        location=False,
     )
 
     c_mode, c_preset = st.columns([3, 2], vertical_alignment="bottom")

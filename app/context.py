@@ -76,14 +76,20 @@ def get_context() -> AppContext:
     return ctx
 
 
-def render_page_frame(ctx: AppContext, page: str, title: str, subtitle: str | None = None) -> None:
-    """Topbar (breadcrumb + region + data status) and page header shared by all pages."""
+SCOPE_LABELS = {"benchmark": "Benchmark observation", "live_location": "Searched location"}
+
+
+def render_page_frame(ctx: AppContext, page: str, title: str, subtitle: str | None = None,
+                      location: bool = True) -> None:
+    """Location search (run-based pages), topbar (breadcrumb + data status) and page header."""
+    if location:
+        from app.components.location_bar import render_location_bar
+
+        render_location_bar()
     label, variant = ctx.data_status
     render_topbar(
-        ["PRAVAH", page],
+        [ctx.study["region"], SCOPE_LABELS.get(ctx.study.get("scope"), "Historical case study"), ctx.study["event_date"]],
         [
-            render_badge(ctx.study["region"], "outline"),
-            render_badge(f"{'Benchmark observation' if ctx.study.get('scope') == 'benchmark' else 'Historical case study'} · {ctx.study['event_date']}", "outline"),
             render_badge(label, variant, dot=True),
         ],
     )

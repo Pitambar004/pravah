@@ -65,6 +65,8 @@ def main():
                    help="Fixed total batch across all ranks (overrides --batch-size = global / WORLD_SIZE). "
                         "Use the same value for 1-node and 2-node runs so the workload is identical.")
     p.add_argument("--run-label", default="", help="Human label shown in the dashboard, e.g. gb10_1node")
+    p.add_argument("--log-every", type=int, default=20,
+                   help="Print a progress line (step, loss, samples/s, ETA) every N steps on rank 0; 0 = off")
     p.add_argument("--dry-run", action="store_true")
     args = p.parse_args()
     if args.epochs < 1 or args.batch_size < 1 or args.max_steps < 0 or args.global_batch_size < 0:
@@ -150,6 +152,12 @@ def main():
     epochs_done = 0
     counts, metrics = None, None
     start = time.perf_counter()
+    planned_steps = args.epochs * len(loader)
+    if args.max_steps:
+        planned_steps = min(planned_steps, args.max_steps)
+    if rank == 0:
+        print(f"start world_size {world} global_batch {args.batch_size * world} steps_per_epoch {len(loader)} "
+              f"planned_steps {planned_steps} device {device}", flush=True)
     for epoch in range(args.epochs):
         if sampler is not None:
             sampler.set_epoch(epoch)
@@ -183,6 +191,12 @@ def main():
                                     "train_sec", "global_samples"])
                     w.writerow([epoch, step, float(loss.item()), time.perf_counter()-start, world,
                                 round(train_seconds, 4), samples_seen * world])
+            if rank == 0 and args.log_every and (step % args.log_every == 0 or step == planned_steps):
+                rate = samples_seen * world / train_seconds if train_seconds else 0.0
+                eta = (planned_steps - step) * train_seconds / step if step else 0.0
+                print(f"progress step {step}/{planned_steps} ({100 * step / planned_steps:.0f}%) epoch {epoch} "
+                      f"loss {float(loss.item()):.4f} samples/s {rate:.2f} elapsed {train_seconds:.0f}s eta {eta:.0f}s",
+                      flush=True)
             if args.max_steps and step >= args.max_steps:
                 break
         epochs_done = epoch + 1

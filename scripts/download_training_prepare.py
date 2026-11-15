@@ -564,8 +564,14 @@ def main():
     weak_base = sen_root / "data/flood_events/WeaklyLabeled"
     weak_images = sorted((weak_base / "S2Weak").glob("*.tif"))
     weak_labels = sorted((weak_base / "S2IndexLabelWeak").glob("*.tif"))
-    if len(weak_images) != 4384 or len(weak_labels) != 4385:
-        raise RuntimeError("Weak-label inventory differs from pinned provider release")
+    # Pinned *.tif counts. The provider's S2IndexLabelWeak folder has 4,385 entries,
+    # but one is a macOS `.DS_Store`, not a label (measured on Pravah-Dataset 2026-11-15).
+    if len(weak_images) != 4384 or len(weak_labels) != 4384:
+        raise RuntimeError(
+            "Weak-label inventory differs from pinned provider release: "
+            f"S2Weak {len(weak_images)} tif (expected 4384), "
+            f"S2IndexLabelWeak {len(weak_labels)} tif (expected 4384)"
+        )
     weak_ids = {p.name.removesuffix("_S2Weak.tif") for p in weak_images}
     unpaired_labels = [
         str(p)

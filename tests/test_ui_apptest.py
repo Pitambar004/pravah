@@ -22,6 +22,7 @@ PAGES = [
     "views/gallery.py",
     "views/alerts.py",
     "views/training.py",
+    "views/outlook.py",
 ]
 
 
@@ -39,6 +40,7 @@ def _isolated_data(monkeypatch, tmp_path):
     monkeypatch.setenv("PRAVAH_ENABLE_TEST_FIXTURES", "1")
     monkeypatch.delenv("PRAVAH_REPLAY_MANIFEST", raising=False)
     monkeypatch.setenv("PRAVAH_TRAINING_DIR", str(tmp_path / "training"))
+    monkeypatch.setenv("PRAVAH_FORECAST_CELLS", str(tmp_path / "forecast_cells.json"))
     monkeypatch.setenv("PRAVAH_SETTLEMENTS", str(tmp_path / "settlements.gpkg"))
     monkeypatch.delenv("PRAVAH_RUN_SOURCE", raising=False)
     st.cache_data.clear()

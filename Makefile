@@ -1,4 +1,4 @@
-.PHONY: test lint format app api serve model
+.PHONY: test lint format app api serve model world-pipeline
 
 DATA_ROOT ?= ./data
 API_URL ?= http://127.0.0.1:8000
@@ -40,3 +40,24 @@ model:
 		PRAVAH_OUTPUTS_DIR=./outputs PRAVAH_INPUT_UNITS=$(INPUT_UNITS) PRAVAH_DEVICE=$(DEVICE) \
 		PRAVAH_OSM_DIR=$(OSM_DIR) PRAVAH_OSM_DATE=$(OSM_DATE) \
 		python -m uvicorn --factory pravah.api.main:create_app --host 127.0.0.1 --port $(PORT)
+
+# World training pipeline (docs/WORLD_TRAINING_PIPELINE.md): render download → prepare → 1-node + 2-node
+# GB10 training with ONE shared manifest and identical training settings. Templates are NOT validated
+# on Fuzzball v4.3.1 until a real run succeeds; rendering only checks structure.
+#   make world-pipeline API_IMAGE=docker://<registry>/pravah-api:<tag> [EPOCHS=3 MAX_STEPS=0 GLOBAL_BATCH=8]
+PY ?= python
+WORLD_ROOT ?= /data/training/expanded_20261114
+WORLD_MANIFEST ?= $(WORLD_ROOT)/manifests/optical_supervised.json
+WORLD_TAG ?= $(shell date -u +%Y%m%dT%H%M%SZ)
+EPOCHS ?= 3
+MAX_STEPS ?= 0
+GLOBAL_BATCH ?= 8
+WORLD_OUT := build/fuzzball/world_$(WORLD_TAG)
+world-pipeline:
+	@test -n "$(API_IMAGE)" || { echo "Set API_IMAGE=docker://<registry>/pravah-api:<tag> (built from infra/docker/Dockerfile.api)"; exit 2; }
+	@mkdir -p $(WORLD_OUT)
+	$(PY) scripts/fuzzball/render_workflow.py workflows/fuzzball/03_download_world.yaml.tmpl --set API_IMAGE=$(API_IMAGE) --set WORLD_ROOT=$(WORLD_ROOT) --out $(WORLD_OUT)/1_download_world.yaml
+	$(PY) scripts/fuzzball/render_workflow.py workflows/fuzzball/04_prepare_world.yaml.tmpl --set API_IMAGE=$(API_IMAGE) --set WORLD_ROOT=$(WORLD_ROOT) --set PAIRS=$(WORLD_MANIFEST) --set GLOBAL_BATCH=$(GLOBAL_BATCH) --out $(WORLD_OUT)/2_prepare_world.yaml
+	$(PY) scripts/fuzzball/render_workflow.py workflows/fuzzball/05_train_1node.yaml.tmpl --set API_IMAGE=$(API_IMAGE) --set PAIRS=$(WORLD_MANIFEST) --set RUN_ID=world_1node_$(WORLD_TAG) --set GLOBAL_BATCH=$(GLOBAL_BATCH) --set EPOCHS=$(EPOCHS) --set MAX_STEPS=$(MAX_STEPS) --out $(WORLD_OUT)/3a_train_1node.yaml
+	$(PY) scripts/fuzzball/render_workflow.py workflows/fuzzball/05_train_2node_ddp.yaml.tmpl --set API_IMAGE=$(API_IMAGE) --set PAIRS=$(WORLD_MANIFEST) --set RUN_ID=world_2node_$(WORLD_TAG) --set GLOBAL_BATCH=$(GLOBAL_BATCH) --set EPOCHS=$(EPOCHS) --set MAX_STEPS=$(MAX_STEPS) --out $(WORLD_OUT)/3b_train_2node.yaml
+	@echo "Rendered to $(WORLD_OUT)/ — validate each with 'fuzzball workflow validate' before starting."

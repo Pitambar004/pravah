@@ -11,6 +11,7 @@ from html import escape
 import streamlit as st
 
 from app.components.compare_map import MapSide, render_compare_map
+from app.components.context_layers import with_downloaded_context
 from app.components.empty_state import render_empty_state
 from app.components.layout import render_callout, render_section_header
 from app.components.map_view import (
@@ -44,22 +45,33 @@ def _no_prediction(runs: list[RunArtifacts]) -> None:
     refs = [r for r in runs if run_role(r) == "post_event"]
     pres = [r for r in runs if run_role(r) == "pre_event"]
     render_empty_state(
-        "No prediction scored yet",
-        "Export the model's flood map for this event (made only from data available before it) and score it "
-        "against the post-event satellite maps. File format: docs/PREDICTION_CONTRACT.md.",
-        action_command=(
+        "No flood forecast supplied",
+        "No forecast run was found in the configured outputs folder. This page is not running a processing job. "
+        "Satellite water maps describe conditions at image acquisition; river and rainfall outlooks do not "
+        "supply the predicted flood-extent map needed for this comparison.",
+        badge="Forecast unavailable", icon_name="info", compact=True)
+    with st.expander("How to add and score a flood forecast"):
+        st.markdown(
+            "Supply a forecast run containing `prediction_metadata.json` and either `predicted_flood.tif` "
+            "or `predicted_flood_probability.tif`, following `docs/PREDICTION_CONTRACT.md`. "
+            "Every input must have verified acquisition and availability times at or before the forecast cutoff.\n\n"
+            "The command below scores an existing forecast; it does not generate one. Replace `<pred_run>` "
+            "with its directory and `<UTC>` with the documented event onset. Pair each post-event reference "
+            "with a pre-event baseline on the same grid, in the same order."
+        )
+        st.code(
             "python scripts/validate_prediction.py --prediction outputs/<pred_run> "
             + " ".join(f"--reference outputs/{r.run_id}" for r in refs[:2])
             + "".join(f" --baseline outputs/{r.run_id}" for r in pres[:2])
-            + " --target new_water --event-time <UTC>"),
-        icon_name="model_training", compact=True)
+            + " --target new_water --event-time <UTC>", language="bash")
     pair = _pair(runs)
     if pair:
         pre, post = pair
-        render_section_header("What the model has to predict", "Water before vs after the event · maps move together")
+        render_section_header("Available satellite evidence", "Water before vs after the event · retrospective comparison, not a forecast")
         render_compare_map(
-            MapSide("Before", short_run_label(pre.run_id), run_layers(pre, "pre"), "Satellite"),
-            MapSide("After", short_run_label(post.run_id), run_layers(post, "post"), "Satellite"), height=520)
+            MapSide("Before", short_run_label(pre.run_id), with_downloaded_context(run_layers(pre, "pre"), light=True), "Satellite"),
+            MapSide("After", short_run_label(post.run_id), with_downloaded_context(run_layers(post, "post"), light=True),
+                    "Satellite"), height=520)
 
 
 def _verdict(v: dict) -> None:
@@ -110,7 +122,7 @@ def _scores(v: dict) -> None:
 
 def _details(pm: dict, v: dict) -> None:
     integ = v.get("integrity") or {}
-    with st.expander("Details: integrity, inputs, per-tile scores, limitations"):
+    with st.expander("Method, sources & limitations"):
         st.markdown(f"**Model** {pm.get('model_id') or '—'} · **input cutoff** {integ.get('input_cutoff_utc') or '—'}"
                     f" · **event** {integ.get('event_time_utc') or '—'} · **scored against** "
                     f"{', '.join(integ.get('reference_acquired_utc') or []) or '—'}")
@@ -128,14 +140,13 @@ def _details(pm: dict, v: dict) -> None:
             "IoU": (r.get("metrics") or {}).get("iou"),
         } for r in v.get("references") or []], hide_index=True, width="stretch",
             column_config={"IoU": st.column_config.NumberColumn(format="percent")})
-        for lim in v.get("interpretation_limits") or []:
+        for lim in dict.fromkeys([*(pm.get("limitations") or []), *(v.get("interpretation_limits") or [])]):
             st.caption(f"• {lim}")
 
 
 def render_validation_section(ctx: AppContext) -> None:
     render_page_frame(ctx, "Prediction vs Reality", "Prediction vs Reality",
-                      f"Did the model predict the {CASE_STUDY['event_date']} Rasuwa flood? Its forecast, scored "
-                      "against water seen by Sentinel-2 after the event.")
+                      f"Forecasts and baselines compared with satellite-derived water after the {CASE_STUDY['event_date']} event.")
     if ctx.is_synthetic:
         render_callout("Scores are never shown for synthetic fixtures.", title="Fixture mode", variant="warning")
         return
@@ -145,13 +156,24 @@ def render_validation_section(ctx: AppContext) -> None:
         _no_prediction(runs)
         return
     by_id = {r.run_id: r for r in runs}
-    p = by_id[st.selectbox("Prediction", [r.run_id for r in preds], key="pv_pred_run",
+    def prediction_label(run_id):
+        kind = (by_id[run_id].prediction_metadata or {}).get("prediction_kind")
+        prefix = "Persistence baseline" if kind == "persistence_baseline" else "Forecast"
+        return f"{prefix} · {short_run_label(run_id)}"
+
+    p = by_id[st.selectbox("Evaluation run", [r.run_id for r in preds], key="pv_pred_run", format_func=prediction_label,
                            label_visibility="collapsed" if len(preds) == 1 else "visible")]
     pm, v = p.prediction_metadata or {}, p.prediction_validation
+    if pm.get("prediction_kind") == "persistence_baseline":
+        render_callout(
+            "Assumes pre-event water stays unchanged, so it predicts no new inundation. "
+            "Reconstructed after the event; not a trained forecast or a historical early warning.",
+            title="Retrospective persistence baseline", variant="warning")
     if not v:
         render_callout("Run scripts/validate_prediction.py on this prediction.", title="Not scored yet")
         return
-    _verdict(v)
+    if pm.get("prediction_kind") != "persistence_baseline" or v.get("status") != "scored":
+        _verdict(v)
     if v.get("status") != "scored":
         _details(pm, v)
         return
@@ -164,13 +186,19 @@ def render_validation_section(ctx: AppContext) -> None:
             if v.get("target") == "new_water":
                 lyr.visible = lyr.id.startswith("change_new")
             right.append(lyr)
-    render_section_header("Predicted vs observed", "Maps move together")
-    render_compare_map(
-        MapSide("Predicted", f"inputs up to {pm.get('input_cutoff_utc') or '—'}", prediction_layers(p)[:1], "Model"),
-        MapSide("Observed after the event", ", ".join(short_run_label(r.run_id) for r in refs), right, "Satellite"),
-        height=520)
-    render_section_header("Right and wrong", "Green = correctly predicted · amber = false alarm · red = missed")
-    context = [lyr for lyr in build_layers(ctx.artifacts, show_retrospective=False)
-               if lyr.group == "Geographic context"]
-    render_map_workspace(context + prediction_layers(p), height=560, mode="full")
+    comparison, errors = st.tabs(["Map comparison", "Hits & misses"], key="pv_validation_map", on_change="rerun")
+    with comparison:
+        if comparison.open:
+            st.caption("Synchronized views · satellite water is model-derived, not field-verified ground truth.")
+            render_compare_map(
+                MapSide("Predicted", f"inputs up to {pm.get('input_cutoff_utc') or '—'}", with_downloaded_context(prediction_layers(p)[:1], light=True), "Model"),
+                MapSide("Observed after the event", ", ".join(short_run_label(r.run_id) for r in refs),
+                        with_downloaded_context(right, light=True), "Satellite"),
+                height=520)
+    with errors:
+        if errors.open:
+            st.caption("Green: correctly predicted · amber: false alarm · red: missed")
+            context = [lyr for lyr in build_layers(ctx.artifacts, show_retrospective=False)
+                       if lyr.group == "Geographic context"]
+            render_map_workspace(with_downloaded_context(context + prediction_layers(p)), height=560, mode="full")
     _details(pm, v)

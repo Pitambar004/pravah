@@ -1,0 +1,120 @@
+# PRAVAH Live Watch 24/7 — GPU API + dashboard, both published as Fuzzball endpoints.
+#
+#   anyone on the network --HTTPS--> endpoint "dashboard" --> dashboard service (Streamlit)
+#                         --HTTPS--> endpoint "api"       --> api service (1× GB10: live engine thread,
+#                                                              GRU emulator, Manning hydraulics, replay)
+#   dashboard --http://api:8000 (in-workflow; "api.service" does not resolve on 4.3.1)--> api
+#
+# Scope {{ENDPOINT_SCOPE}}: "public" lets anyone with the URL open it. Read routes are open; refresh and
+# inference writes need X-Pravah-Token (set api:PRAVAH_API_TOKEN via --env). Uses the artifacts written by
+# 09_watch_build under {{WATCH_ROOT}}. Holds one GPU while running: stop with `fuzzball workflow stop`.
+# TEMPLATE — NOT validated on v4.3.1 until a real run succeeds.
+version: v4
+
+volumes:
+  dataset:
+    use: "{{VOLUME_PROVISIONER}}"
+    name: "{{VOLUME_NAME}}"
+
+services:
+  api:
+    image:
+      uri: "{{API_IMAGE}}"
+    mounts:
+      /data:
+        volume: dataset
+    env:
+      - PYTHONUNBUFFERED=1
+      - PRAVAH_WATCH_ROOT={{WATCH_ROOT}}
+      - PRAVAH_WATCH_ENABLED=1
+      - PRAVAH_DATA_ROOT=/data
+      - PRAVAH_CHECKPOINT={{MODEL_DIR}}/checkpoint_best.pt
+      - PRAVAH_SCENES_DIR={{SCENES_DIR}}
+      - PRAVAH_OUTPUTS_DIR=/data/outputs/predictions
+      - PRAVAH_INPUT_UNITS=reflectance
+      - PRAVAH_DEVICE=cuda
+    script: |
+      #!/bin/sh
+      set -eu
+      WHEELS=/data/training/expanded_20261114/environment/wheels
+      (cd "$WHEELS" && sha256sum -c --quiet SHA256SUMS)
+      python -m pip install --disable-pip-version-check --no-index --no-deps --find-links "$WHEELS" rasterio==1.5.2 affine==3.0.1 >/dev/null
+      python -m pip install --disable-pip-version-check "fastapi>=0.110" "uvicorn>=0.29" "httpx>=0.25" "shapely>=2.0" "pyproj>=3.5" "geopandas>=0.14" "python-dotenv>=1.0" >/dev/null
+      export PRAVAH_WATCH_ASSETS="${CODE:-/opt/pravah}/data/processed"
+      mkdir -p /data/outputs/predictions
+      python -c "import torch; assert torch.cuda.is_available(); print('GPU', torch.cuda.get_device_name(0), flush=True)"
+      test -f {{WATCH_ROOT}}/river_model/river_model.json || { echo "Run 09_watch_build first: {{WATCH_ROOT}} has no river model" >&2; exit 3; }
+      exec python -m uvicorn --factory pravah.watch.server:create_app --host 0.0.0.0 --port 8000 --workers 1
+    network:
+      ports:
+        - name: http
+          port: 8000
+          protocol: tcp
+      endpoints:
+        - name: api
+          port-name: http
+          protocol: http
+          type: path
+          scope: "{{ENDPOINT_SCOPE}}"
+    readiness-probe:
+      http-get:
+        path: /health
+        port: 8000
+      initial-delay-seconds: 60
+      period-seconds: 15
+    persist: true
+    resource:
+      cpu:
+        cores: 12
+        affinity: NUMA
+      memory:
+        size: 64GiB
+      devices:
+        nvidia.com/gpu: 1
+
+  dashboard:
+    image:
+      uri: "{{API_IMAGE}}"
+    mounts:
+      /data:
+        volume: dataset
+    env:
+      - PYTHONUNBUFFERED=1
+      - PRAVAH_API_URL=http://api:8000
+      - PRAVAH_OUTPUTS_DIR=/data/outputs/predictions
+    script: |
+      #!/bin/sh
+      set -eu
+      WHEELS=/data/training/expanded_20261114/environment/wheels
+      (cd "$WHEELS" && sha256sum -c --quiet SHA256SUMS)
+      python -m pip install --disable-pip-version-check --no-index --no-deps --find-links "$WHEELS" rasterio==1.5.2 affine==3.0.1 >/dev/null
+      python -m pip install --disable-pip-version-check "streamlit>=1.40" "altair>=5" "pandas>=2" "httpx>=0.25" "shapely>=2.0" "pyproj>=3.5" "geopandas>=0.14" "python-dotenv>=1.0" "pillow>=10" >/dev/null
+      cd "${CODE:-/opt/pravah}"
+      exec sh scripts/fuzzball/start_dashboard.sh
+    network:
+      ports:
+        - name: web
+          port: 8501
+          protocol: tcp
+      endpoints:
+        - name: dashboard
+          port-name: web
+          protocol: http
+          type: path
+          scope: "{{ENDPOINT_SCOPE}}"
+    readiness-probe:
+      tcp-socket:
+        port: 8501
+      initial-delay-seconds: 60
+      period-seconds: 15
+    depends-on:
+      - name: api
+        status: RUNNING
+        description: Dashboard reads the live watch API
+    persist: true
+    resource:
+      cpu:
+        cores: 4
+        affinity: NUMA
+      memory:
+        size: 8GiB

@@ -298,9 +298,10 @@ def build_layers(artifacts: Any, show_retrospective: bool = True) -> list[MapLay
         *prediction_layers(artifacts),
         *_exposure_layers(artifacts, fixture),
     ]
-    if (meta.get("case_study") or {}).get("scope") == "benchmark":
+    scope = (meta.get("case_study") or {}).get("scope")
+    if scope in ("benchmark", "live_location"):
         layers = [layer for layer in layers if layer.id != "admin" or layer.available]
-    if show_retrospective and (meta.get("case_study") or {}).get("scope") != "benchmark":
+    if show_retrospective and scope not in ("benchmark", "live_location"):  # Rasuwa UNOSAT reference only
         unosat = artifacts.unosat_geojson
         props = (unosat or {}).get("features", [{}])[0].get("properties", {}) if unosat else {}
         layers.append(

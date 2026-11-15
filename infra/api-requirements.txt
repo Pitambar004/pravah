@@ -1,0 +1,11 @@
+# CPython 3.12 / Linux ARM64 serving dependencies. PyTorch stays in the NVIDIA image.
+fastapi==0.115.12
+uvicorn==0.34.3
+pydantic==2.12.2
+numpy==2.1.0
+rasterio==1.5.2
+affine==3.0.1
+shapely==2.1.2
+pyproj==3.7.2
+httpx==0.28.1
+python-dotenv==1.2.1

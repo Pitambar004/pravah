@@ -1,0 +1,75 @@
+# PRAVAH inference API on one GB10, PRIVATE: no Fuzzball endpoint is published. Reach it from your Mac with
+#   fuzzball workflow port-forward <workflow-id> api 18000:8000
+# and point the local dashboard at http://127.0.0.1:18000. Nothing is exposed beyond your Fuzzball login.
+# Render in bundle mode (stock NVIDIA image + code bundle) with the checkpoint as an extra ingress:
+#   render_workflow.py ... --bundle fb://.../bundle.tar.gz --bundle-sha256 <sha> \
+#     --ingress fb://.../checkpoint_best.pt=checkpoint_best.pt --set CHECKPOINT_SHA256=<sha>
+# FastAPI/uvicorn/shapely are installed from PyPI at start (jobs have outbound internet; the download job
+# fetched from Hugging Face/GCS). rasterio comes from the verified offline wheels. Stop it when finished:
+#   fuzzball workflow stop <workflow-id>     (it holds a GPU while running)
+# TEMPLATE — NOT validated on v4.3.1 until a real run succeeds.
+version: v4
+
+volumes:
+  dataset:
+    use: "{{VOLUME_PROVISIONER}}"
+    name: "{{VOLUME_NAME}}"
+
+services:
+  api:
+    image:
+      uri: "{{API_IMAGE}}"
+    mounts:
+      /data:
+        volume: dataset
+    env:
+      - PYTHONUNBUFFERED=1
+      - PRAVAH_DATA_ROOT=/data
+      - PRAVAH_CHECKPOINT={{MODEL_DIR}}/checkpoint_best.pt
+      - PRAVAH_SCENES_DIR={{SCENES_DIR}}
+      - PRAVAH_OUTPUTS_DIR=/data/outputs/predictions
+      - PRAVAH_INPUT_UNITS=reflectance
+      - PRAVAH_DEVICE=cuda
+      - PRAVAH_REQUIRE_CUDA=1
+      - PRAVAH_BATCH_SIZE=8
+      # Public provider URLs (same values as .env.example). Set explicitly: python-dotenv is not
+      # installed here, so pravah.configuration cannot read .env files in this job.
+      - PRAVAH_CDSE_SEARCH_URL=https://stac.dataspace.copernicus.eu/v1/search
+      - PRAVAH_GCP_BUCKET_URL=https://storage.googleapis.com/gcp-public-data-sentinel-2/
+    script: |
+      #!/bin/sh
+      set -eu
+      WHEELS=/data/training/expanded_20261114/environment/wheels
+      (cd "$WHEELS" && sha256sum -c --quiet SHA256SUMS)
+      python -m pip install --disable-pip-version-check --no-index --no-deps --find-links "$WHEELS" rasterio==1.5.2 affine==3.0.1 >/dev/null
+      python -m pip install --disable-pip-version-check "fastapi>=0.110" "uvicorn>=0.29" "shapely>=2.0" "httpx>=0.25" "pyproj>=3.5" "geopandas>=0.14" >/dev/null
+      # Stage the model once onto the volume, refusing anything but the expected checkpoint.
+      mkdir -p "{{MODEL_DIR}}" /data/outputs/predictions
+      if [ ! -s "{{MODEL_DIR}}/checkpoint_best.pt" ]; then
+        echo "{{CHECKPOINT_SHA256}}  /transfer/in/checkpoint_best.pt" | sha256sum -c -
+        cp /transfer/in/checkpoint_best.pt "{{MODEL_DIR}}/checkpoint_best.pt"
+      fi
+      echo "{{CHECKPOINT_SHA256}}  {{MODEL_DIR}}/checkpoint_best.pt" | sha256sum -c -
+      test -d "{{SCENES_DIR}}" || { echo "Scenes directory {{SCENES_DIR}} not found" >&2; exit 3; }
+      python -c "import torch; assert torch.cuda.is_available(); print('CUDA', torch.cuda.get_device_name(0))"
+      exec python -m uvicorn --factory pravah.api.main:create_app --host 0.0.0.0 --port 8000
+    network:
+      ports:
+        - name: http
+          port: 8000
+          protocol: tcp
+    readiness-probe:
+      http-get:
+        path: /health
+        port: 8000
+      initial-delay-seconds: 30
+      period-seconds: 10
+    persist: true
+    resource:
+      cpu:
+        cores: 8
+        affinity: NUMA
+      memory:
+        size: 32GiB
+      devices:
+        nvidia.com/gpu: 1

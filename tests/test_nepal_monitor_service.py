@@ -25,6 +25,9 @@ def test_nepal_routes_render_with_missing_sources(monkeypatch, tmp_path):
     monkeypatch.setenv("PRAVAH_ENABLE_TEST_FIXTURES", "0")
     st.cache_data.clear()
     app = AppTest.from_file(str(Path(__file__).parents[1] / "app/Home.py"), default_timeout=30).run()
+    assert not app.exception  # default page is Live Watch: renders an honest "unavailable" with no API
+    assert any("Live state unavailable" in w.value for w in app.warning)
+    app.switch_page("views/nepal_monitor.py").run()
     assert not app.exception
     assert "Rasuwa Hydropower &amp; River Watch" in " ".join(m.value for m in app.markdown)
     app.switch_page("views/simulate.py").run()

@@ -13,7 +13,7 @@ from typing import Any
 import streamlit as st
 
 from app import api_client
-from app.data_loader import RunArtifacts
+from app.data_loader import RunArtifacts, grid_footprint_geojson
 
 
 @st.cache_data(ttl=15, show_spinner=False)
@@ -48,5 +48,6 @@ def load_remote_run(run_id: str) -> RunArtifacts:
         a.missing_files.append("observed_water.geojson")
         if got["geo_err"]:
             a.errors.append(f"observed_water.geojson: {got['geo_err']}")
+    a.aoi_geojson = grid_footprint_geojson(a.observed_metadata)  # so the map opens on this run's image
     a.missing_files += ["exposure_summary.json", "benchmark.json"]
     return a

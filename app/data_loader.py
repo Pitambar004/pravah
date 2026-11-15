@@ -88,9 +88,49 @@ class RunArtifacts:
     def acquired_at(self) -> str | None:
         return (self.observed_metadata or {}).get("acquired_at_utc")
 
+    @property
+    def scope(self) -> str | None:
+        """case_study.scope: None for the Rasuwa study, 'live_location' / 'benchmark' for other places."""
+        return ((self.observed_metadata or {}).get("case_study") or {}).get("scope")
+
+    @property
+    def is_other_place(self) -> bool:
+        """Run is not over the Rasuwa study area, so Rasuwa AOI/context/event dates do not apply."""
+        return self.scope in OTHER_PLACE_SCOPES
+
 
 EXPOSURE_FEATURE_CATEGORIES = ("buildings", "roads", "bridges")
 CONTEXT_LAYER_FILES = ("rivers", "admin_boundaries")
+OTHER_PLACE_SCOPES = ("benchmark", "live_location")
+
+
+def grid_footprint_geojson(meta: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Image footprint polygon (EPSG:4326) from the run's recorded raster grid, or None.
+
+    Uses only ``crs``, ``transform`` (affine a, b, c, d, e, f) and ``raster_width/height`` written by
+    the inference engine; nothing is estimated. Corners are reprojected, so the polygon is exact for
+    the grid's outline in the display CRS up to edge curvature between corners."""
+    meta = meta or {}
+    crs, t = meta.get("crs"), meta.get("transform")
+    w, h = meta.get("raster_width"), meta.get("raster_height")
+    if not crs or not isinstance(t, list) or len(t) < 6 or not w or not h:
+        return None
+    try:
+        from pyproj import Transformer
+
+        a, b, c, d, e, f = (float(v) for v in t[:6])
+        corners = [(c + a * col + b * row, f + d * col + e * row) for col, row in ((0, 0), (w, 0), (w, h), (0, h))]
+        tr = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+        ring = [list(tr.transform(x, y)) for x, y in corners]
+    except Exception:  # noqa: BLE001 - pyproj raises several types for unusual CRSs
+        return None
+    if not all(-180 <= x <= 180 and -90 <= y <= 90 for x, y in ring):
+        return None
+    return {"type": "FeatureCollection", "features": [{
+        "type": "Feature",
+        "properties": {"source": f"raster grid in observed_metadata.json ({crs}, {w}×{h} px)"},
+        "geometry": {"type": "Polygon", "coordinates": [ring + [ring[0]]]},
+    }]}
 
 RUN_MARKER_FILES = (
     "observed_metadata.json", "exposure_summary.json", "benchmark.json", "observed_water.tif", "job.json",
@@ -252,29 +292,36 @@ def load_run_artifacts(
             elif gerr:
                 artifacts.errors.append(gerr)
 
-    # Study-area context layers (rivers, admin boundaries); cleared below in fixture mode
+    # Study-area context layers (rivers, admin boundaries); cleared below in fixture mode.
+    # The shared context and config/ AOIs describe Rasuwa: a searched place or benchmark run only
+    # gets layers from its own folder, otherwise its map would open over Nepal.
+    other_place = artifacts.is_other_place
     context_dir = Path(os.environ.get("PRAVAH_CONTEXT_DIR", "data/processed/context"))
     for name in CONTEXT_LAYER_FILES:
         local_context = path / f"{name}.geojson"
+        if not local_context.exists() and other_place:
+            continue
         geo, gerr = safe_read_geojson(local_context if local_context.exists() else context_dir / f"{name}.geojson")
         if geo:
             artifacts.context_layers[name] = geo
         elif gerr:
             artifacts.errors.append(gerr)
 
-    # Check for core AOI in config/
-    aoi_candidates = [
-        path / "image_footprint.geojson",
-        Path("config/aois/aoi_core.geojson"),
-        Path("config/aois/analysis_coverage.geojson"),
-        Path("config/aoi_core.geojson")
-    ]
+    aoi_candidates = [path / "image_footprint.geojson"]
+    if not other_place:
+        aoi_candidates += [
+            Path("config/aois/aoi_core.geojson"),
+            Path("config/aois/analysis_coverage.geojson"),
+            Path("config/aoi_core.geojson"),
+        ]
     for cand in aoi_candidates:
         if cand.exists():
             aoi_data, _ = safe_read_geojson(cand)
             if aoi_data:
                 artifacts.aoi_geojson = aoi_data
                 break
+    if artifacts.aoi_geojson is None and other_place:
+        artifacts.aoi_geojson = grid_footprint_geojson(artifacts.observed_metadata)
 
     # If no real artifacts exist AND synthetic fallback is requested
     if not artifacts.has_any_artifacts and allow_synthetic_fallback:
@@ -384,7 +431,8 @@ def load_training_run(folder: Path | str) -> dict[str, Any]:
     evaluation, e5 = safe_read_json(d / "final_evaluation.json")
     config, _ = safe_read_json(d / "config.json")
     info = summary or env or {}
-    finished = summary or (evaluation or {}).get("status") == "finished"
+    # "finished", "finished_validation_only", ... (the local trainer records how far evaluation went)
+    finished = summary or str((evaluation or {}).get("status") or "").startswith("finished")
     status = "completed" if finished else ("running" if env or metrics else "empty")
     return {
         "id": d.name,

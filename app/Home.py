@@ -55,12 +55,14 @@ if _PASSCODE and not st.session_state.get("pv_authed"):
 
 # Main pages: the only ones in the sidebar. Each maps to a project goal.
 PAGES = [
-    st.Page("views/nepal_monitor.py", title="Rasuwa Operations", icon=":material/water:", url_path="nepal", default=True),
+    st.Page("views/watch.py", title="Live Watch 24/7", icon=":material/monitor_heart:", url_path="watch", default=True),
+    st.Page("views/nepal_monitor.py", title="Rasuwa Operations", icon=":material/water:", url_path="nepal"),
     st.Page("views/simulate.py", title="Simulate Rasuwa flood", icon=":material/play_circle:", url_path="simulate"),
     st.Page("views/lakes.py", title="Glacier & Lake Watch", icon=":material/landscape:", url_path="lakes"),
     st.Page("views/validation.py", title="Prediction vs Reality", icon=":material/fact_check:", url_path="validation"),
     st.Page("views/gallery.py", title="Maps", icon=":material/map:", url_path="maps"),
     st.Page("views/live.py", title="Live Prediction", icon=":material/sensors:", url_path="live"),
+    st.Page("views/outlook.py", title="River Outlook", icon=":material/waves:", url_path="outlook"),
     st.Page("views/alerts.py", title="Alerts", icon=":material/campaign:", url_path="alerts"),
     st.Page("views/training.py", title="Training", icon=":material/model_training:", url_path="training"),
 ]
@@ -77,7 +79,7 @@ HIDDEN_PAGES = [
     st.Page("views/methodology.py", title="Sources & Methodology", icon=":material/menu_book:", url_path="methodology"),
 ]
 current = st.navigation(PAGES + HIDDEN_PAGES, position="hidden")
-OPERATIONS = {"Rasuwa Operations", "Simulate Rasuwa flood", "Glacier & Lake Watch"}
+OPERATIONS = {"Live Watch 24/7", "Rasuwa Operations", "Simulate Rasuwa flood", "Glacier & Lake Watch"}
 operating_page = current.title in OPERATIONS
 
 _MARK = (
@@ -93,13 +95,23 @@ with st.sidebar:
     html(
         f'<div class="pv-brand">{_MARK}<div><div class="pv-brand-name">PRAVAH'
         '<span class="pv-brand-deva" lang="ne">प्रवाह</span></div>'
-        '<div class="pv-brand-sub">Flood Intelligence Platform</div></div></div>'
+        '<div class="pv-brand-sub">Water &amp; flood evidence</div></div></div>'
     )
-    for label, in_group in (("Rasuwa operations", True), ("Model evidence", False)):
+    navigation_groups = (
+        ("Monitor", ("Live Watch 24/7", "Rasuwa Operations", "River Outlook", "Glacier & Lake Watch")),
+        ("Explore", ("Maps", "Simulate Rasuwa flood", "Prediction vs Reality")),
+        ("Model workspace", ("Live Prediction", "Alerts", "Training")),
+    )
+    navigation_labels = {"Rasuwa Operations": "River watch", "River Outlook": "River outlook",
+                         "Glacier & Lake Watch": "Glaciers & lakes", "Maps": "Evidence maps",
+                         "Simulate Rasuwa flood": "Event replay", "Live Prediction": "Run inference",
+                         "Prediction vs Reality": "Prediction vs reality", "Alerts": "Simulated alerts"}
+    pages_by_title = {page.title: page for page in PAGES}
+    for label, titles in navigation_groups:
         html(f'<div class="pv-nav-label">{label}</div>')
-        for page in PAGES:
-            if (page.title in OPERATIONS) == in_group:
-                st.page_link(page, label=page.title, icon=page.icon)
+        for title in titles:
+            page = pages_by_title[title]
+            st.page_link(page, label=navigation_labels.get(title, title), icon=page.icon)
 
     html('<div class="pv-side-divider"></div>')
     runs = discover_available_runs(OUTPUTS_DIR)
@@ -118,6 +130,10 @@ with st.sidebar:
     if requested_run in options and st.session_state.get("pv_requested_run") != requested_run:
         st.session_state["pv_run"] = requested_run
         st.session_state["pv_requested_run"] = requested_run
+    # A searched place's finished run (app/components/location_bar.py) becomes the active run.
+    pending_run = st.session_state.pop("pv_pending_run", None)
+    if pending_run in options:
+        st.session_state["pv_run"] = pending_run
     if st.session_state.get("pv_run") not in (None, *options):
         st.session_state.pop("pv_run")  # run disappeared from storage
     # Test fixtures require an explicit developer flag and manual opt-in; never on by default.
@@ -161,14 +177,8 @@ if not use_demo and any((item or {}).get("is_synthetic") for item in
     st.stop()
 
 with st.sidebar:
-    if operating_page:
-        html('<div class="pv-side-meta"><span>Office view</span><span>Rasuwa</span></div>'
-             '<div class="pv-side-meta"><span>Monitoring</span><span>Rivers · lakes · assets</span></div>'
-             '<div class="pv-side-meta"><span>Mode</span><span>Experimental</span></div>'
-             f'<div class="pv-side-footer"><strong>PRAVAH · Team 12</strong><br>v{APP_VERSION} · public-source watches</div>')
-    else:
-        html(f'<div class="pv-side-footer"><strong>Team 12</strong> · CIQ Hackathon 2026<br>'
-             f'v{APP_VERSION} · retrospective prototype</div>')
+    html('<div class="pv-side-footer"><strong>Research workspace</strong><br>'
+         'Experimental · not an official warning service</div>')
 
 if artifacts.errors and not operating_page:
     render_callout(
