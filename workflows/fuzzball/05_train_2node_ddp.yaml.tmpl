@@ -1,0 +1,46 @@
+# Experiment B — the SAME training on TWO Team 12 GB10 nodes with PyTorch DDP (WORLD_SIZE=2, NCCL).
+# Fuzzball "generic" multinode: /multinode/generic-helper provides exec_all; each node gets $RANK
+# (0 or 1) and $MULTINODE_NODE_IP is the head node's IP (expanded on the head before forwarding).
+# Syntax follows CIQ's 4.4 generic/NCCL docs — NOT validated on Team 12's v4.3.1 yet; confirm the
+# multinode block, rendezvous port and NCCL network settings with a CIQ mentor before relying on it.
+# Proof of real 2-node training = training_summary.json with world_size 2, two distinct hostnames,
+# cuda_verified true on both ranks, AND two distinct node IDs in the Fuzzball job logs.
+# TEMPLATE — render with scripts/fuzzball/render_workflow.py; NOT validated on v4.3.1 yet.
+version: v4
+
+volumes:
+  dataset:
+    use: "{{VOLUME_PROVISIONER}}"
+    name: "{{VOLUME_NAME}}"
+
+jobs:
+  train-2node-ddp:
+    image:
+      uri: "{{API_IMAGE}}"
+    mounts:
+      /data:
+        volume: dataset
+    env:
+      - PYTHONUNBUFFERED=1
+      - NCCL_DEBUG=INFO
+    multinode:
+      nodes: 2
+      implementation: generic
+    script: |
+      #!/bin/sh
+      . /multinode/generic-helper
+      # \$RANK is escaped so each node expands its own rank; MULTINODE_NODE_IP expands on the head node.
+      exec_all "torchrun --nnodes=2 --nproc-per-node=1 --node-rank=\$RANK \
+        --master-addr=$MULTINODE_NODE_IP --master-port={{MASTER_PORT}} \
+        /opt/pravah/scripts/train_ddp.py --pairs {{PAIRS}} \
+        --output-dir /data/outputs/training/{{RUN_ID}} --device cuda \
+        --global-batch-size {{GLOBAL_BATCH}} --epochs {{EPOCHS}} --max-steps {{MAX_STEPS}} \
+        --run-label {{RUN_ID}}"
+    resource:
+      cpu:
+        cores: 8
+        affinity: NUMA
+      memory:
+        size: 32GiB
+      devices:
+        nvidia.com/gpu: 1

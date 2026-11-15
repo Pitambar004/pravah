@@ -57,3 +57,24 @@ def test_public_scope_is_flagged(tmp_path, capsys):
     assert rw.main([str(TMPL / "07_serve.yaml.tmpl"), *IMG, "--set", "ENDPOINT_SCOPE=public",
                     "--out", str(tmp_path / "p.yaml")]) == 0
     assert "WARNING" in capsys.readouterr().out
+
+
+def test_training_templates_render_with_matching_workload(tmp_path):
+    one, two = tmp_path / "1.yaml", tmp_path / "2.yaml"
+    common = [*IMG[:2], "--set", "GLOBAL_BATCH=16", "--set", "EPOCHS=2"]
+    assert rw.main([str(TMPL / "05_train_1node.yaml.tmpl"), *common, "--set", "RUN_ID=gb10_1node_a",
+                    "--out", str(one)]) == 0
+    assert rw.main([str(TMPL / "05_train_2node_ddp.yaml.tmpl"), *common, "--set", "RUN_ID=gb10_2node_a",
+                    "--out", str(two)]) == 0
+    j1 = yaml.safe_load(one.read_text())["jobs"]["train-1node"]
+    j2 = yaml.safe_load(two.read_text())["jobs"]["train-2node-ddp"]
+    assert j2["multinode"] == {"nodes": 2, "implementation": "generic"}
+    assert "--nnodes=2" in j2["script"] and "--global-batch-size 16" in j2["script"]
+    assert "16" in j1["command"] and "--require-cuda" not in j1["command"] and "cuda" in j1["command"]
+    assert j1["resource"]["devices"]["nvidia.com/gpu"] == 1 == j2["resource"]["devices"]["nvidia.com/gpu"]
+
+
+def test_training_template_rejects_odd_batch_and_bad_pairs(tmp_path):
+    base = [str(TMPL / "05_train_2node_ddp.yaml.tmpl"), *IMG[:2], "--set", "RUN_ID=x", "--out", str(tmp_path / "x")]
+    assert rw.main([*base, "--set", "GLOBAL_BATCH=3"]) == 2
+    assert rw.main([*base, "--set", "PAIRS=/etc/passwd"]) == 2

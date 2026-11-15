@@ -17,6 +17,11 @@ PAGES = [
     "views/environment.py",
     "views/compute.py",
     "views/methodology.py",
+    "views/validation.py",
+    "views/live.py",
+    "views/gallery.py",
+    "views/alerts.py",
+    "views/training.py",
 ]
 
 
@@ -33,6 +38,8 @@ def _isolated_data(monkeypatch, tmp_path):
     monkeypatch.setenv("PRAVAH_USER_CONTEXT_DIR", str(tmp_path / "user_context"))
     monkeypatch.setenv("PRAVAH_ENABLE_TEST_FIXTURES", "1")
     monkeypatch.delenv("PRAVAH_REPLAY_MANIFEST", raising=False)
+    monkeypatch.setenv("PRAVAH_TRAINING_DIR", str(tmp_path / "training"))
+    monkeypatch.setenv("PRAVAH_SETTLEMENTS", str(tmp_path / "settlements.gpkg"))
     monkeypatch.delenv("PRAVAH_RUN_SOURCE", raising=False)
     st.cache_data.clear()
     yield
@@ -42,9 +49,9 @@ def _isolated_data(monkeypatch, tmp_path):
 def _app(page: str, demo: bool) -> AppTest:
     at = AppTest.from_file(str(HOME_PATH), default_timeout=30)
     at.run()
-    at.sidebar.toggle[0].set_value(demo)
-    at.run()
     at.switch_page(page)
+    at.run()
+    at.sidebar.toggle(key="pv_demo").set_value(demo)
     at.run()
     return at
 
@@ -153,6 +160,6 @@ def test_map_uses_api_runs_when_no_local_runs(monkeypatch, tmp_path):
     at = _app("views/flood_map.py", demo=False)
     assert not at.exception, at.exception
     text = _text(at)
-    assert "TEST_REMOTE_RUN" in text and "Run artifacts loaded" in text
+    assert at.selectbox(key="pv_run").value == "TEST_REMOTE_RUN" and "Run artifacts loaded" in text
     assert "Synthetic fixture mode" not in text
     st.cache_data.clear()

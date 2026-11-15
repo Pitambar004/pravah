@@ -1,6 +1,6 @@
 """CLI: ``python -m pravah.inference --scene S2.tif --checkpoint ckpt.pt --output-dir out/``.
 
-Used by the batch Fuzzball workflow (``workflows/fuzzball/06_inference.yaml``)
+Used by the batch Fuzzball workflow (``workflows/fuzzball/06_inference_batch.yaml.tmpl``)
 and for local verification. Prints the run metadata JSON on success.
 """
 from __future__ import annotations
@@ -32,8 +32,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--tile-size", type=int, default=256)
     p.add_argument("--overlap", type=int, default=32)
     p.add_argument("--batch-size", type=int, default=8)
-    p.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
+    p.add_argument("--device", choices=["auto", "cpu", "cuda", "mps"], default="auto")
     p.add_argument("--require-cuda", action="store_true", help="Fail instead of falling back to CPU")
+    p.add_argument("--input-units", choices=["dn", "reflectance"], default="dn",
+                   help="dn = Sen1Floods11-style digital numbers (/10000); reflectance = already-scaled TOA "
+                        "reflectance such as the P3 s2_l1c_reflectance.tif")
+    p.add_argument("--source-metadata", default=None,
+                   help="observed_metadata.json of the same scene (e.g. the Prithvi run); copies scene_id and "
+                        "acquisition/availability times so the dashboard can place this run before/after the event")
     args = p.parse_args(argv)
 
     scene = Path(args.scene)
@@ -47,11 +53,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
     print(json.dumps({"runtime": engine.runtime(), "model": engine.info.to_dict()}, indent=2), flush=True)
-    result = engine.predict(
-        scene, Path(args.output_dir) / run_id, run_id=run_id, threshold=args.threshold,
-        tile_size=args.tile_size, overlap=args.overlap,
-        progress=lambda d, n: print(f"tiles {d}/{n}", flush=True) if d == n or d % 50 == 0 else None,
-    )
+    extra = {}
+    if args.source_metadata:
+        src_md = json.loads(Path(args.source_metadata).read_text())
+        extra = {k: src_md[k] for k in ("scene_id", "product_id", "acquired_at_utc", "available_at_utc",
+                                         "availability_basis", "sensor", "processing_level") if k in src_md}
+        extra["source_metadata_run_id"] = src_md.get("run_id")
+    try:
+        result = engine.predict(
+            scene, Path(args.output_dir) / run_id, run_id=run_id, threshold=args.threshold,
+            tile_size=args.tile_size, overlap=args.overlap, input_units=args.input_units, extra_metadata=extra,
+            progress=lambda d, n: print(f"tiles {d}/{n}", flush=True) if d == n or d % 50 == 0 else None,
+        )
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
     summary = {k: v for k, v in result.metadata.items() if k not in ("model_info", "transform")}
     print(json.dumps(summary, indent=2, default=str))
     return 0

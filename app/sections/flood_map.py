@@ -6,7 +6,12 @@ import json
 import streamlit as st
 
 from app.components.layout import render_section_header
-from app.components.map_view import KIND_LABELS, build_layers, render_map_workspace
+from app.components.map_view import (
+    KIND_LABELS,
+    build_layers,
+    build_multi_run_layers,
+    render_map_workspace,
+)
 from app.context import AppContext, render_page_frame
 
 
@@ -19,7 +24,14 @@ def render_flood_map_section(ctx: AppContext) -> None:
         "Click a feature to inspect its attributes, source and limitations.",
     )
     a = ctx.artifacts
-    layers = build_layers(a)
+    every = st.toggle("Show every run on this map", value=False, key="pv_map_every", disabled=a.is_synthetic,
+                      help="Adds a layer group for each run folder (before, after and predictions). "
+                           "Otherwise only the run selected in the sidebar is shown.")
+    if every and not a.is_synthetic:
+        from app.runs import all_runs, run_title
+        layers = build_multi_run_layers(all_runs(), a, run_title)
+    else:
+        layers = build_layers(a)
     available = [layer for layer in layers if layer.available]
 
     t_l, t_r = st.columns([4, 1], vertical_alignment="center")

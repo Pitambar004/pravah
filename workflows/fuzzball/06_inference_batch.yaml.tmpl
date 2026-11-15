@@ -27,6 +27,8 @@ jobs:
       - /data/outputs/predictions
       - --run-id
       - "{{RUN_ID}}"
+      - --input-units
+      - "{{INPUT_UNITS}}"
       - --require-cuda
     resource:
       cpu:

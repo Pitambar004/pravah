@@ -3,6 +3,7 @@
 Safely reads output artifacts from outputs/<run_id>/ complying with docs/contracts.md.
 Never crashes on missing, empty, or malformed files.
 """
+import csv
 import json
 import os
 from dataclasses import dataclass, field
@@ -56,6 +57,14 @@ class RunArtifacts:
     # Study-area context layers shared by all runs (scripts/build_context_layers.py)
     context_layers: dict[str, dict[str, Any]] = field(default_factory=dict)
 
+    # Flood *prediction* run (docs/PREDICTION_CONTRACT.md) and its scoring
+    # against post-event observations (scripts/validate_prediction.py)
+    prediction_metadata: dict[str, Any] | None = None
+    prediction_validation: dict[str, Any] | None = None
+    predicted_flood_geojson: dict[str, Any] | None = None
+    # {reference_run_id: {"hit"|"false_alarm"|"miss": FeatureCollection}}
+    agreement_layers: dict[str, dict[str, dict[str, Any]]] = field(default_factory=dict)
+
     # Status flags & diagnostics
     missing_files: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -68,7 +77,16 @@ class RunArtifacts:
             or self.benchmark
             or self.observed_water_tif
             or self.water_geojson
+            or self.prediction_metadata
         )
+
+    @property
+    def is_prediction(self) -> bool:
+        return bool(self.prediction_metadata)
+
+    @property
+    def acquired_at(self) -> str | None:
+        return (self.observed_metadata or {}).get("acquired_at_utc")
 
 
 EXPOSURE_FEATURE_CATEGORIES = ("buildings", "roads", "bridges")
@@ -76,7 +94,9 @@ CONTEXT_LAYER_FILES = ("rivers", "admin_boundaries")
 
 RUN_MARKER_FILES = (
     "observed_metadata.json", "exposure_summary.json", "benchmark.json", "observed_water.tif", "job.json",
+    "prediction_metadata.json",
 )
+AGREEMENT_CLASSES = ("hit", "false_alarm", "miss")
 
 
 def run_has_artifacts(run_folder: Path | str) -> bool:
@@ -207,6 +227,24 @@ def load_run_artifacts(
                     artifacts.errors.append(gerr)
         elif err:
             artifacts.errors.append(err)
+        # 7. Prediction run + validation (optional; never synthesised)
+        for name, attr, reader in (("prediction_metadata.json", "prediction_metadata", safe_read_json),
+                                   ("prediction_validation.json", "prediction_validation", safe_read_json),
+                                   ("predicted_flood.geojson", "predicted_flood_geojson", safe_read_geojson)):
+            val, verr = reader(path / name)
+            if val:
+                setattr(artifacts, attr, val)
+            elif verr:
+                artifacts.errors.append(verr)
+        vdir = path / "validation"
+        if vdir.is_dir():
+            for ref_dir in sorted(d for d in vdir.iterdir() if d.is_dir()):
+                for cls in AGREEMENT_CLASSES:
+                    geo, gerr = safe_read_geojson(ref_dir / f"agreement_{cls}.geojson")
+                    if geo:
+                        artifacts.agreement_layers.setdefault(ref_dir.name, {})[cls] = geo
+                    elif gerr:
+                        artifacts.errors.append(gerr)
         for category in EXPOSURE_FEATURE_CATEGORIES:
             geo, gerr = safe_read_geojson(path / f"exposure_{category}.geojson")
             if geo:
@@ -305,3 +343,69 @@ def load_replay_catalog_with_source(
     if allow_synthetic:
         return SYNTHETIC_REPLAY_ASSETS, "synthetic_fixture"
     return [], None
+
+
+def load_all_runs(outputs_dir: Path | str = "outputs") -> list[RunArtifacts]:
+    """Every run folder that holds real artifacts, oldest acquisition first (predictions last)."""
+    root = Path(outputs_dir)
+    runs = [load_run_artifacts(root / r) for r in discover_available_runs(root) if run_has_artifacts(root / r)]
+    return sorted(runs, key=lambda a: (a.is_prediction, a.acquired_at or "9999", a.run_id))
+
+
+# ---------------------------------------------------------------- training runs
+TRAINING_FILES = ("run_environment.json", "training_summary.json", "train_metrics.csv", "final_evaluation.json")
+# Column aliases: scripts/train_ddp.py (per step) vs the local trainer (per epoch)
+_METRIC_ALIASES = {"step": "optimizer_step", "mean_training_loss": "loss_rank0", "elapsed_seconds": "train_sec"}
+
+
+def _read_metrics_csv(path: Path) -> tuple[list[dict[str, float]], str | None]:
+    if not path.is_file():
+        return [], None
+    rows: list[dict[str, float]] = []
+    try:
+        with path.open(newline="", encoding="utf-8") as fh:
+            for row in csv.DictReader(fh):
+                try:
+                    rows.append({_METRIC_ALIASES.get(k, k): float(v) for k, v in row.items() if v not in (None, "")})
+                except ValueError:
+                    continue  # partially written last line while training is running
+    except OSError as exc:
+        return [], f"{path.name}: {exc}"
+    return rows, None
+
+
+def load_training_run(folder: Path | str) -> dict[str, Any]:
+    """One scripts/train_ddp.py output folder. Status is derived only from files present."""
+    d = Path(folder)
+    env, e1 = safe_read_json(d / "run_environment.json")
+    summary, e2 = safe_read_json(d / "training_summary.json")
+    val, e3 = safe_read_json(d / "validation_latest.json")
+    metrics, e4 = _read_metrics_csv(d / "train_metrics.csv")
+    evaluation, e5 = safe_read_json(d / "final_evaluation.json")
+    config, _ = safe_read_json(d / "config.json")
+    info = summary or env or {}
+    finished = summary or (evaluation or {}).get("status") == "finished"
+    status = "completed" if finished else ("running" if env or metrics else "empty")
+    return {
+        "id": d.name,
+        "folder": str(d),
+        "label": info.get("run_label") or d.name,
+        "status": status,
+        "environment": env,
+        "summary": summary,
+        "validation": val,
+        "evaluation": evaluation,  # held-out test scores written once after model selection
+        "config": config,
+        "metrics": metrics,
+        "mtime": max((p.stat().st_mtime for p in d.iterdir()), default=0.0) if d.is_dir() else 0.0,
+        "errors": [e for e in (e1, e2, e3, e4, e5) if e],
+    }
+
+
+def load_training_runs(*training_dirs: Path | str) -> list[dict[str, Any]]:
+    runs = []
+    for root in map(Path, training_dirs):
+        if root.is_dir():
+            runs += [load_training_run(d) for d in root.iterdir()
+                     if d.is_dir() and not d.name.startswith(".") and any((d / f).exists() for f in TRAINING_FILES)]
+    return sorted(runs, key=lambda r: r["mtime"], reverse=True)
