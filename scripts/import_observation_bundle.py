@@ -56,7 +56,8 @@ def import_bundle(bundle: Path, outputs: Path, max_polygons: int = 5000) -> Path
     (dest / "observed_water.geojson").write_text(json.dumps(gj) + "\n")
     md.setdefault("model", "Prithvi-EO-2.0-300M-TL-Sen1Floods11 (IBM/NASA pretrained)"
                   if "Prithvi" in str(md.get("model_id")) else md.get("model_id"))
-    md["dashboard_import"] = {"source_bundle": str(bundle), "water_polygon_count": total,
+    # bundle name only: never record local filesystem paths in data that gets shared
+    md["dashboard_import"] = {"source_bundle": bundle.name, "water_polygon_count": total,
                               "water_polygons_written": len(gj["features"]),
                               "observed_water_sha256_verified": bool(recorded)}
     (dest / "observed_metadata.json").write_text(json.dumps(md, indent=2) + "\n")
