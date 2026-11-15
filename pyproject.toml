@@ -15,11 +15,12 @@ dependencies = [
 [project.optional-dependencies]
 ml = ["torch>=2.2"]
 catalog = ["pystac-client>=0.7"]
-ui = ["streamlit>=1.35", "folium>=0.16"]
+ui = ["streamlit>=1.67", "folium>=0.16"]
 api = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
+live = ["fastapi>=0.110", "uvicorn>=0.29", "streamlit>=1.67", "pillow>=10", "osm2geojson==0.3.2", "torch>=2.2"]
 dev = ["pytest>=8", "ruff>=0.6", "pyyaml>=6"]
-full = ["torch>=2.2", "pystac-client>=0.7", "streamlit>=1.35", "folium>=0.16", "fastapi>=0.110",
-        "uvicorn[standard]>=0.29", "pytest>=8", "ruff>=0.6"]
+full = ["torch>=2.2", "pystac-client>=0.7", "streamlit>=1.67", "folium>=0.16", "fastapi>=0.110",
+        "uvicorn[standard]>=0.29", "pillow>=10", "osm2geojson==0.3.2", "pytest>=8", "ruff>=0.6"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -49,21 +49,23 @@ def render_compute_section(ctx: AppContext) -> None:
     a: RunArtifacts = ctx.artifacts
     bench = a.benchmark or {}
     meta = a.observed_metadata or {}
+    runtime = meta.get("runtime") or {}
 
     col_env, col_runs = st.columns([2, 3])
     with col_env:
-        render_section_header("Compute environment", "Planned target; verified only by a benchmark artifact")
+        render_section_header("Compute environment", "Actual runtime recorded with the selected prediction")
         nodes = bench.get("node_ids") or []
-        cuda = bench.get("cuda_verified")
+        cuda = runtime.get("cuda_verified", bench.get("cuda_verified"))
         env_state = render_badge("Fixture", "warning") if a.is_synthetic else (
-            render_badge("Verified run", "success") if bench else render_badge("Not yet verified", "neutral"))
-        html(card("Target cluster", kv_list([
-            ("Hardware (planned)", "2× Lenovo ThinkStation PGX · NVIDIA GB10"),
-            ("Orchestration (planned)", "CIQ Fuzzball 4.3.1"),
-            ("Access window", "Team plan: Sun 15 Nov 2026, 09:00 CT"),
+            render_badge("Recorded run", "success") if runtime or bench else render_badge("Not yet recorded", "neutral"))
+        html(card("Execution environment", kv_list([
+            ("Device", runtime.get("device", "Not recorded")),
+            ("GPU", runtime.get("gpu_name") or "No CUDA GPU used"),
+            ("Host", runtime.get("hostname", "Not recorded")),
+            ("PyTorch", runtime.get("torch_version", "Not recorded")),
             ("Node IDs", ", ".join(nodes) if nodes else "Not recorded"),
             ("CUDA verified", "Yes" if cuda is True else "No" if cuda is False else "Not recorded"),
-            ("Workflow status", "Recorded in benchmark.json" if bench else "No workflow run recorded"),
+            ("Execution", "Fuzzball only when recorded in workflow provenance" if cuda else "Local prediction"),
         ], mono_keys=("Node IDs",)), trailing=env_state))
     with col_runs:
         render_section_header("Processing runs", "From observed_metadata.json and benchmark.json")
@@ -75,7 +77,8 @@ def render_compute_section(ctx: AppContext) -> None:
                     "Input scene": meta.get("source_raster") or "Not recorded",
                     "Tiles": bench.get("tile_count") or meta.get("tile_count"),
                     "Status": "Synthetic fixture" if a.is_synthetic else "Completed (artifact present)",
-                    "2-node compute (s)": bench.get("two_node_seconds"),
+                    "Model compute (s)": (meta.get("timings_seconds") or {}).get("model_compute"),
+                    "Inference total (s)": (meta.get("timings_seconds") or {}).get("end_to_end"),
                 }],
                 hide_index=True,
                 width="stretch",
@@ -84,7 +87,13 @@ def render_compute_section(ctx: AppContext) -> None:
             render_empty_state("No processing runs recorded", "Run metadata appears after tile inference and stitching.",
                                expected_files=["observed_metadata.json"], icon_name="pending_actions", compact=True)
 
-    render_section_header("Multi-node performance", "Compute-only time for an identical tile manifest on 1 vs 2 nodes")
+    evaluation = meta.get("training_evaluation")
+    if evaluation:
+        render_section_header("Completed training evaluation", "Recorded full-dataset run; checkpoint selected on validation only")
+        st.dataframe([{"Split": name, **evaluation[key]["metrics"]} for name, key in
+                      [("Official test", "official_test"), ("Bolivia holdout", "bolivia_holdout")]], hide_index=True)
+        st.caption(f"Selected epoch {evaluation['selected_epoch']} · {evaluation['optimizer_steps']:,} training steps · checkpoint {evaluation['checkpoint_sha256'][:16]}…")
+    render_section_header("Multi-node performance", "Requires the identical workload measured on one and two actual nodes")
     if not bench:
         render_empty_state(
             "Benchmark results will appear after a verified compute run",

@@ -1,5 +1,7 @@
 # Run the prepared U-Net on Fuzzball — 15 November 2026
 
+For the working local dashboard with real inference, maps, exposure and Nepal environmental context, see [REAL_APP_HANDOFF.md](REAL_APP_HANDOFF.md). It is separate from the GPU batch below.
+
 The launcher packages the completed local U-Net, its exact source code and one real six-band validation image. It uploads approximately 3.4 MB; **do not download or re-upload the full Fuzzball dataset**. Training mode reuses the original hand-labeled sources already stored on `Pravah-Dataset` and verifies their provider checksums before preparing remote paths.
 
 ## First: get one actual GPU inference result

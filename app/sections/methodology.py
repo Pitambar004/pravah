@@ -6,7 +6,7 @@ import json
 import streamlit as st
 
 from app.components.layout import card, html, kv_list, render_badge
-from app.context import CASE_STUDY, AppContext, render_page_frame
+from app.context import AppContext, render_page_frame
 
 SOURCES = [
     {"Source": "Sentinel-2 MSI Level-1C", "Role": "Optical model input (6 bands)", "Evidence type": "Observed",
@@ -45,11 +45,11 @@ def render_methodology_section(ctx: AppContext) -> None:
             "acquisition time, verified availability time, licence and checksum.</li>"
             "<li><strong>Pre-processing.</strong> Sentinel-2 L1C reflectances are reordered to "
             "<code>[B2, B3, B4, B8A, B11, B12]</code> and scaled by 1/10,000. Sentinel-1 SAR is never fed to optical models.</li>"
-            "<li><strong>Tiled inference.</strong> A deterministic tile manifest is partitioned across workers; each tile yields "
+            "<li><strong>Tiled inference.</strong> A deterministic tile manifest is processed by the configured runtime; each tile yields "
             "water probability and a validity mask.</li>"
             "<li><strong>Stitching.</strong> Tiles are merged into <code>observed_water.tif</code>: 1 = model-inferred water, "
-            "0 = no water, 255 = invalid (cloud, nodata, outside AOI).</li>"
-            "<li><strong>Exposure.</strong> Water polygons are intersected with OSM infrastructure in EPSG:32645 so that "
+            "0 = no water, 255 = invalid source. Reference cloud labels are used for scoring only.</li>"
+            "<li><strong>Exposure.</strong> Water polygons are intersected with OSM infrastructure in a recorded local metric CRS so that "
             "areas and lengths are metric.</li>"
             "<li><strong>Replay.</strong> Every source is gated by acquisition and verified availability time before it can "
             "appear in a historical view.</li></ol>"
@@ -57,8 +57,7 @@ def render_methodology_section(ctx: AppContext) -> None:
             f"<p>{render_badge('Observed', 'accent')} satellite acquisitions · "
             f"{render_badge('Model-derived', 'accent')} segmentation output · "
             f"{render_badge('Derived exposure', 'warning')} geometric intersections · "
-            f"{render_badge('Retrospective reference', 'warning')} later products such as UNOSAT · "
-            f"{render_badge('Hypothetical scenario', 'scenario')} not observed.</p>"
+            f"{render_badge('Retrospective reference', 'warning')} later reference products.</p>"
             "</div>"
         )
 
@@ -82,18 +81,18 @@ def render_methodology_section(ctx: AppContext) -> None:
                 ("Role", "Primary pretrained water segmentation"),
                 ("Input", "Sentinel-2 L1C, 6 bands"),
                 ("Band order", "B2, B3, B4, B8A, B11, B12"),
-                ("Status", "Candidate — adapter not yet implemented"),
+                ("Status", "Separate optional model; not used by this U-Net service"),
                 ("Model ID", "ibm-nasa-geospatial/Prithvi-EO-2.0-300M-TL-Sen1Floods11"),
             ], mono_keys=("Model ID",)), trailing=render_badge("Pretrained", "accent")))
         with c2:
             html(card("Team 12 baseline U-Net", kv_list([
                 ("Role", "Transparent independent baseline"),
                 ("Input", "Same 6 optical bands"),
-                ("Loss", "BCE with ignore label −1"),
-                ("Status", "Implemented and unit-tested; not trained on real scenes"),
+                ("Loss", "Weighted cross entropy with ignore label −1"),
+                ("Status", "Completed training record loaded" if (ctx.artifacts.observed_metadata or {}).get("training_evaluation") else "See the selected run's checkpoint provenance"),
                 ("Code", "src/pravah/ml/unet.py"),
             ], mono_keys=("Code",)), trailing=render_badge("Baseline", "neutral")))
-        st.caption("No accuracy metrics are reported until evaluated on held-out data with recorded splits.")
+        st.caption("Held-out metrics from the completed run appear on Compute & Performance. A single example score is not aggregate accuracy.")
 
     with t_replay:
         html(
@@ -115,8 +114,8 @@ def render_methodology_section(ctx: AppContext) -> None:
             '<div class="pv-doc"><ol>'
             "<li><strong>Retrospective, not a forecast.</strong> PRAVAH maps evidence after acquisition; it does not predict "
             "flood arrival or provide early warning.</li>"
-            "<li><strong>Cloud occlusion.</strong> Monsoon cloud blocks optical sensors; occluded pixels are invalid (255), "
-            "not dry.</li>"
+            "<li><strong>Cloud occlusion.</strong> Source nodata is invalid (255). Reference cloud masks restrict scoring; "
+            "predictions under unmasked cloud are unvalidated.</li>"
             "<li><strong>Terrain effects.</strong> Steep valleys cause shadow in optical data and layover in SAR.</li>"
             "<li><strong>Debris vs water.</strong> Sediment-laden flows differ spectrally from clear water; UNOSAT mudflow "
             "extent is a different class from model water.</li>"
@@ -129,7 +128,7 @@ def render_methodology_section(ctx: AppContext) -> None:
         a = ctx.artifacts
         bundle = {
             "application": "PRAVAH",
-            "case_study": f"{CASE_STUDY['region']} ({CASE_STUDY['event_date']})",
+            "case_study": f"{ctx.study['region']} ({ctx.study['event_date']})",
             "run_id": a.run_id,
             "is_synthetic": a.is_synthetic,
             "replay_catalog_source": ctx.catalog_source,

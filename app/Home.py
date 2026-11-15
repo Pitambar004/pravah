@@ -25,7 +25,7 @@ from app.theme import TOKENS, apply_theme
 
 APP_VERSION = "0.1.0"
 # Run folders: ./outputs locally; the Pravah-Dataset predictions dir on Fuzzball.
-OUTPUTS_DIR = Path(os.environ.get("PRAVAH_OUTPUTS_DIR", "outputs"))
+OUTPUTS_DIR = Path(os.environ.get("PRAVAH_OUTPUTS_DIR", "outputs/live_app/runs" if Path("outputs/live_app/config.json").exists() else "outputs"))
 
 st.set_page_config(
     page_title="PRAVAH · Flood Intelligence",
@@ -55,6 +55,7 @@ PAGES = [
     st.Page("views/replay.py", title="Historical Replay", icon=":material/history:", url_path="replay"),
     st.Page("views/exposure.py", title="Infrastructure Exposure", icon=":material/apartment:", url_path="exposure"),
     st.Page("views/inference.py", title="Run Inference", icon=":material/play_circle:", url_path="inference"),
+    st.Page("views/environment.py", title="Nepal Data", icon=":material/landscape:", url_path="environment"),
     st.Page("views/compute.py", title="Compute & Performance", icon=":material/memory:", url_path="compute"),
     st.Page("views/methodology.py", title="Sources & Methodology", icon=":material/menu_book:", url_path="methodology"),
 ]
@@ -82,7 +83,7 @@ with st.sidebar:
     html('<div class="pv-side-divider"></div><div class="pv-nav-label">Data source</div>')
     runs = discover_available_runs(OUTPUTS_DIR)
     local_real = [r for r in runs if run_has_artifacts(OUTPUTS_DIR / r)]
-    runs = local_real + [r for r in runs if r not in local_real]  # runs with artifacts first
+    runs = sorted(local_real, key=lambda run: (OUTPUTS_DIR / run).stat().st_mtime, reverse=True)
     # Run source: local disk (shared volume) or the inference API over HTTP, e.g. a laptop
     # dashboard reading runs produced on Fuzzball. PRAVAH_RUN_SOURCE = auto | local | api.
     source_pref = os.environ.get("PRAVAH_RUN_SOURCE", "auto")
@@ -92,6 +93,10 @@ with st.sidebar:
         remote_runs, remote_err = list_remote_runs(api_client.api_url())
     use_remote = bool(remote_runs) and (source_pref == "api" or not local_real)
     options = remote_runs if use_remote else runs
+    requested_run = st.query_params.get("run")
+    if requested_run in options and st.session_state.get("pv_requested_run") != requested_run:
+        st.session_state["pv_run"] = requested_run
+        st.session_state["pv_requested_run"] = requested_run
     if st.session_state.get("pv_run") not in (None, *options):
         st.session_state.pop("pv_run")  # run disappeared from storage
     if use_remote:
@@ -106,20 +111,24 @@ with st.sidebar:
                                    help=f"No run folders found under {OUTPUTS_DIR}/")
     if source_pref == "api" and not remote_runs:
         st.caption(f"No completed runs from the inference API{': ' + remote_err if remote_err else ''}")
-    # Fixtures default on only when no run holds real artifacts (local or remote).
-    st.session_state.setdefault("pv_demo", not (local_real or remote_runs))
-    use_demo = st.toggle(
-        "Show synthetic fixtures",
-        key="pv_demo",
-        help="Loads clearly labelled synthetic test fixtures to preview layouts when no run artifacts exist. "
-        "Fixtures are never real observations.",
-    )
+    # Test fixtures require an explicit developer flag and manual opt-in.
+    st.session_state.setdefault("pv_demo", False)
+    if os.environ.get("PRAVAH_ENABLE_TEST_FIXTURES") == "1":
+        use_demo = st.toggle("Show synthetic fixtures", key="pv_demo", help="Developer tests only")
+    else:
+        use_demo = False
+        st.session_state["pv_demo"] = False
 
 if use_remote and not use_demo:
     artifacts = load_remote_run(chosen)
 else:
     artifacts = load_run_artifacts(run_folder or str(OUTPUTS_DIR / "latest"), allow_synthetic_fallback=use_demo)
 ctx = build_context(artifacts)
+
+if not use_demo and any((item or {}).get("is_synthetic") for item in
+                       [artifacts.observed_metadata, artifacts.exposure_summary, artifacts.benchmark]):
+    st.error("This run is marked synthetic. It cannot be displayed in the real-data application.")
+    st.stop()
 
 with st.sidebar:
     label, variant = ctx.data_status

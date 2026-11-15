@@ -24,13 +24,6 @@ from app.components.layout import (
 from app.components.metric_card import render_metric_card
 from app.context import AppContext, render_page_frame
 
-RUN_KEY = "pv_run"  # sidebar run selectbox key (Home.py)
-
-
-def _open_run(run_id: str) -> None:
-    st.session_state[RUN_KEY] = run_id
-    st.session_state["pv_demo"] = False
-
 
 def _fmt_secs(v) -> str | None:
     return f"{v:.2f}" if isinstance(v, (int, float)) else None
@@ -143,17 +136,17 @@ def _jobs_panel() -> None:
             elif j["status"] == "failed":
                 st.caption(j.get("error") or "Failed")
             else:
-                st.caption("Waiting for the GPU worker")
+                st.caption("Waiting for the inference worker")
         with c4:
             if j["status"] == "succeeded":
-                st.button("Open run", key=f"open_{j['job_id']}", on_click=_open_run, args=(j["run_id"],),
-                          icon=":material/map:", width="stretch")
+                st.page_link("views/flood_map.py", label="Open run", query_params={"run": j["run_id"]},
+                             icon=":material/map:", width="stretch")
 
 
 def render_inference_section(ctx: AppContext) -> None:
     render_page_frame(
         ctx, "Run Inference", "Run Inference",
-        "Send a Sentinel-2 scene from the Pravah-Dataset volume to the MiniUNet service. Output is a "
+        "Send a verified Sentinel-2 scene to the MiniUNet service. Output is a "
         "georeferenced water mask with measured timings — model evidence, not a forecast.",
     )
     st_json, err = api_client.status()
@@ -172,7 +165,7 @@ def render_inference_section(ctx: AppContext) -> None:
         render_metric_card("Execution device", rt.get("device"), subtext="Reported by torch in the API process",
                            icon_name="memory")
     with m2:
-        render_metric_card("Jobs pending", q.get("pending"), subtext=f"Single GPU worker · max {q.get('max')}",
+        render_metric_card("Jobs pending", q.get("pending"), subtext=f"Single inference worker · max {q.get('max')}",
                            icon_name="pending_actions")
     with m3:
         out_ok = ((st_json.get("storage") or {}).get("outputs_dir") or {}).get("writable")

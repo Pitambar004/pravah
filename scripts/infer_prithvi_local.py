@@ -53,7 +53,9 @@ def main():
         logger=False,
         callbacks=[],
         default_root_dir=str(output),
-        enable_checkpointing=False,
+        # TerraTorch CLI inserts checkpoint callbacks during construction even
+        # with callbacks=[]; inference calls the model directly and never fits.
+        enable_checkpointing=True,
     )
     config["data"]["init_args"].update(
         data_root=str(Path("data/raw/sen1floods11/v1.1").resolve()),
@@ -133,7 +135,7 @@ def main():
         "effective_config_sha256": sha256(config_path),
         "changes_from_upstream": [
             "disable unused backbone pre-download, then strictly load full fine-tuned checkpoint",
-            "CPU float32, one device, no trainer callbacks/logging",
+            "CPU float32, one device, logging disabled; CLI checkpoint callbacks allowed during construction, no training",
             "export 0=dry, 1=water, 255=source-invalid instead of upstream 0/255 with nodata=0",
         ],
         "normalization": "Unmodified upstream load_example and run_model: six bands /10000 when mean>1, then official datamodule means/stds",

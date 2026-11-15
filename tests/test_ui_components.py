@@ -41,7 +41,7 @@ def test_map_layers_from_fixture(tmp_path):
     a = load_run_artifacts(tmp_path, allow_synthetic_fallback=True)
     layers = {layer.id: layer for layer in build_layers(a)}
     assert layers["water"].available and layers["aoi"].available and layers["unosat"].available
-    assert not layers["susceptibility"].available  # no scenario artifact -> disabled, not faked
+    assert "susceptibility" not in layers and "inundation" not in layers
     assert layers["unosat"].visible is False  # retrospective layer is off by default
     html = build_map_html(list(layers.values()), synthetic=True)
     assert "leaflet" in html.lower()

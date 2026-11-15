@@ -77,7 +77,7 @@ class MapLayer:
 
     @property
     def available(self) -> bool:
-        return bool(self.data and self.data.get("features"))
+        return bool(self.extra.get("image_url")) or (isinstance(self.data, dict) and "features" in self.data)
 
 
 def _round_coords(obj: Any, ndigits: int = 6) -> Any:
@@ -170,10 +170,10 @@ def build_layers(artifacts: Any, show_retrospective: bool = True) -> list[MapLay
     meta = artifacts.observed_metadata or {}
     layers = [
         MapLayer(
-            id="aoi", name="Study area (AOI)", group="Geographic context", kind="context",
+            id="aoi", name="Image footprint / study boundary", group="Geographic context", kind="context",
             color=TOKENS["text_secondary"], data=_slim_geojson(artifacts.aoi_geojson), fill=False, dash="6 4",
-            opacity=0.9, source="config/aois/" + fixture, description="Bounded analysis corridor for the Bhote Koshi–Trishuli valleys.",
-            limitation="Pixels outside the AOI or occluded by cloud are invalid (class 255), never 'no water'.",
+            opacity=0.9, source="Run footprint or supplied study boundary" + fixture, description="Image coverage is distinct from an authoritative affected extent.",
+            limitation="Source nodata is invalid (255). Reference cloud masks restrict scoring; unmasked-cloud predictions are unvalidated.",
             unavailable_reason="No AOI GeoJSON in config/aois/",
         ),
         _context_layer(artifacts, "admin_boundaries", "admin", "Administrative boundaries", TOKENS["text_muted"]),
@@ -189,15 +189,16 @@ def build_layers(artifacts: Any, show_retrospective: bool = True) -> list[MapLay
             unavailable_reason="No stitched water polygons (exposure.geojson / polygons.geojson)",
         ),
         MapLayer(id="imagery", name="Sentinel-2 scene preview", group="Satellite evidence", kind="observed",
-                 color=TOKENS["accent"], unavailable_reason="No preview tiles generated (GeoTIFFs are not loaded in-browser)"),
+                 color=TOKENS["accent"], opacity=0.9,
+                 extra={"image_url": (meta.get("scene_preview") or {}).get("data_url"),
+                        "bounds": (meta.get("scene_preview") or {}).get("bounds")},
+                 source=meta.get("source_raster", "—"), unavailable_reason="No source preview exported"),
         *_change_layers(artifacts),
         *_exposure_layers(artifacts, fixture),
-        MapLayer(id="susceptibility", name="Terrain susceptibility", group="Scenarios", kind="scenario",
-                 color=TOKENS["map_scenario"], unavailable_reason="No scenario model has been run"),
-        MapLayer(id="inundation", name="Hypothetical inundation", group="Scenarios", kind="scenario",
-                 color=TOKENS["map_scenario"], unavailable_reason="No scenario model has been run"),
     ]
-    if show_retrospective:
+    if (meta.get("case_study") or {}).get("scope") == "benchmark":
+        layers = [layer for layer in layers if layer.id != "admin" or layer.available]
+    if show_retrospective and (meta.get("case_study") or {}).get("scope") != "benchmark":
         unosat = artifacts.unosat_geojson
         props = (unosat or {}).get("features", [{}])[0].get("properties", {}) if unosat else {}
         layers.append(
@@ -459,11 +460,18 @@ CFG.layers.forEach(spec => {
   const s = { on: spec.available && spec.visible, opacity: spec.opacity, layer: null };
   state[spec.id] = s;
   if (!spec.available) return;
+  if (spec.extra && spec.extra.image_url) {
+    if (!map.getPane('scenePreview')) { map.createPane('scenePreview'); map.getPane('scenePreview').style.zIndex = 350; }
+    s.layer = L.imageOverlay(spec.extra.image_url, spec.extra.bounds, {opacity: s.opacity, pane: 'scenePreview'});
+    if (s.on) { s.layer.addTo(map); s.layer.bringToBack(); }
+    return;
+  }
   s.layer = L.geoJSON(spec.data, {
     style: () => styleFor(spec, s),
     onEachFeature: (f, lyr) => {
       const p = f.properties || {};
-      lyr.bindTooltip(String(p.label || p.name || spec.name), { className: 'pv', sticky: true, direction: 'top' });
+      const tip = document.createElement('span'); tip.textContent = String(p.label || p.name || spec.name);
+      lyr.bindTooltip(tip, { className: 'pv', sticky: true, direction: 'top' });
       if (!preview) lyr.on('click', (ev) => {
         L.DomEvent.stopPropagation(ev);
         if (selected) selected.layer.setStyle(styleFor(selected.spec, state[selected.spec.id]));
@@ -508,13 +516,13 @@ function renderPanel() {
         const op = el('div', { class: 'opacity' });
         op.append(el('span', {}, 'Opacity'));
         const rng = el('input', { type: 'range', min: '0', max: '100', value: String(Math.round(s.opacity * 100)), 'aria-label': spec.name + ' opacity' });
-        rng.oninput = () => { s.opacity = rng.value / 100; s.layer.setStyle(styleFor(spec, s)); };
+        rng.oninput = () => { s.opacity = rng.value / 100; if (spec.extra && spec.extra.image_url) s.layer.setOpacity(s.opacity); else s.layer.setStyle(styleFor(spec, s)); };
         op.append(rng); op.hidden = !s.on; row.append(op);
         cb.addEventListener('change', () => { op.hidden = !cb.checked; });
       }
       cb.addEventListener('change', () => {
         s.on = cb.checked;
-        if (s.on) s.layer.addTo(map); else { map.removeLayer(s.layer); if (selected && selected.spec.id === spec.id) closeDetail(); }
+        if (s.on) { s.layer.addTo(map); if (spec.extra && spec.extra.image_url) s.layer.bringToBack(); } else { map.removeLayer(s.layer); if (selected && selected.spec.id === spec.id) closeDetail(); }
         renderLegend(); updateEmpty();
       });
       body.append(row);

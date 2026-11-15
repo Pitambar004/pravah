@@ -30,6 +30,10 @@ class AppContext:
     catalog_source: str | None
 
     @property
+    def study(self) -> dict:
+        return (self.artifacts.observed_metadata or {}).get("case_study") or CASE_STUDY
+
+    @property
     def is_synthetic(self) -> bool:
         return self.artifacts.is_synthetic
 
@@ -75,8 +79,8 @@ def render_page_frame(ctx: AppContext, page: str, title: str, subtitle: str | No
     render_topbar(
         ["PRAVAH", page],
         [
-            render_badge(CASE_STUDY["region"], "outline"),
-            render_badge(f"Historical case study · {CASE_STUDY['event_date']}", "outline"),
+            render_badge(ctx.study["region"], "outline"),
+            render_badge(f"{'Benchmark observation' if ctx.study.get('scope') == 'benchmark' else 'Historical case study'} · {ctx.study['event_date']}", "outline"),
             render_badge(label, variant, dot=True),
         ],
     )

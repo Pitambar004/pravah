@@ -88,11 +88,22 @@ Source/provenance and licensing ambiguity for Sen1Floods11 are documented in `TR
 
 ## Optional published Prithvi reference
 
-The [official IBM/NASA flood fine-tune](https://huggingface.co/ibm-nasa-geospatial/Prithvi-EO-2.0-300M-TL-Sen1Floods11) is being prepared separately at revision `91ce9d38086a80b078a192b374df758b8855b732`. Its 1,276,843,350-byte checkpoint must match SHA256 `76eed77d8bd543ae441308b80e8408502243a871cb8a338ddc8220ed96dfc270`. The official sample/config/code/card files are pinned and verified. Three provider examples are in the official test split; selected examples do not constitute a new independent benchmark.
+The [official IBM/NASA flood fine-tune](https://huggingface.co/ibm-nasa-geospatial/Prithvi-EO-2.0-300M-TL-Sen1Floods11) completed reference inference at 21:41 CT on 14 November, at revision `91ce9d38086a80b078a192b374df758b8855b732`. Its downloaded 1,276,843,350-byte checkpoint passed SHA256 `76eed77d8bd543ae441308b80e8408502243a871cb8a338ddc8220ed96dfc270`. The official sample/config/code/card files are pinned and verified. Three provider examples are in the official test split; selected examples do not constitute a new independent benchmark.
 
-An isolated Python 3.12 environment under `outputs/local_demo/runtime/prithvi-venv` preserves the project environment. The prepared adapter calls the unmodified upstream preprocessing and inference functions, disables the redundant backbone pre-download, and requires strict loading of the complete fine-tuned checkpoint. The export separates dry/water/nodata instead of the upstream writer's ambiguous 0/255 mask. No Prithvi success is claimed until `outputs/local_demo/prithvi_demo/summary.json` reports `passed`.
+An isolated Python 3.12 environment under `outputs/local_demo/runtime/prithvi-venv` preserves the project environment. The adapter calls the unmodified upstream preprocessing and inference functions, disables the redundant backbone pre-download, and requires strict loading of the complete fine-tuned checkpoint. The export separates dry/water/nodata instead of the upstream writer's ambiguous 0/255 mask. `outputs/local_demo/prithvi_demo/summary.json` reports `passed`, including strict checkpoint loading. Selected-example F1/IoU: India_900498 **0.9579/0.9192**, Spain_7370579 **0.8410/0.7256**, USA_430764 **0.8059/0.6750**. These are not the same examples as the live U-Net service, so their scores are not a controlled model comparison.
 
-The optional reference check is queued by `scripts/run_prithvi_when_ready.py`. To prioritize the hand-labeled data download, Prithvi byte-range transfers were stopped with their scratch files preserved; the coordinator resumes those ranges automatically after the full U-Net pipeline completes, then checks dependencies and runs CPU inference. Its current phase is in `outputs/local_demo/prithvi_status.json`; failures are retained in `prithvi_import.log` or `prithvi_inference.log`. It waits at most four hours for the baseline and keeps the Mac awake while waiting/running. The sequential checkpoint download was replaced by eight resumable byte-range workers; final acceptance still requires the provider's complete SHA256. Partial ranges are not model weights.
+The first attempt exposed a TerraTorch/Lightning callback configuration conflict. The adapter now permits the CLI-injected checkpoint callback during construction; it invokes inference directly and never trains. The successful retry is recorded in `prithvi_inference_retry.log`, with the previous failure retained separately. `prithvi_status.json` now points to the completed result and `runtime/prithvi_environment.txt` records the installed versions. Exact successful command:
+
+```bash
+PYTHONPATH=src outputs/local_demo/runtime/prithvi-venv/bin/python -u scripts/infer_prithvi_local.py --device cpu
+# STRICT_CHECKPOINT_LOAD_PASSED
+# PRITHVI_EXPORTED India_900498 ...
+# PRITHVI_EXPORTED Spain_7370579 ...
+# PRITHVI_EXPORTED USA_430764 ...
+# PRITHVI_FINISHED
+```
+
+This is an upstream pretrained reference, not a model trained by PRAVAH, and remains separate from the interactive U-Net application.
 
 ## Checks
 

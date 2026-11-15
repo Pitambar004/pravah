@@ -48,7 +48,7 @@ def render_exposure_section(ctx: AppContext) -> None:
         "Infrastructure Exposure",
         "Infrastructure Exposure",
         "Mapped intersections between the model-derived water extent and OpenStreetMap infrastructure, "
-        "computed in a metric projection (EPSG:32645).",
+        "computed in the metric projection recorded for this run.",
     )
     a = ctx.artifacts
     exp = a.exposure_summary
@@ -69,9 +69,11 @@ def render_exposure_section(ctx: AppContext) -> None:
         variant="warning",
     )
 
+    if exp.get("context_scope"):
+        st.info(exp["context_scope"])
     roads = exp.get("road_length_m_intersecting")
     src = ctx.source_note("exposure_summary.json")
-    cols = st.columns(4)
+    cols = st.columns(3)
     specs = [
         {"label": "Buildings in mapped extent", "icon_name": "apartment", "value": exp.get("building_footprints_intersecting"),
              "unit": "footprints", "subtext": src},
@@ -79,8 +81,6 @@ def render_exposure_section(ctx: AppContext) -> None:
              "unit": "km", "subtext": src},
         {"label": "Bridges in mapped extent", "icon_name": "bridge", "value": exp.get("bridge_tagged_features_intersecting"),
              "unit": "features", "subtext": src},
-        {"label": "Estimated resident population", "icon_name": "groups", "value": exp.get("modelled_population_estimate"),
-             "unit": "modelled", "empty_label": "Not computed", "subtext": "Modelled estimate, not a headcount"},
     ]
     for col, spec in zip(cols, specs, strict=True):
         with col:
@@ -100,7 +100,7 @@ def render_exposure_section(ctx: AppContext) -> None:
             ("Mask class", exp.get("source_type", "—")),
             ("Valid pixels", f"{exp['valid_pixel_count']:,}" if isinstance(exp.get("valid_pixel_count"), int) else "—"),
             ("OSM snapshot", exp.get("osm_snapshot_timestamp", "Not recorded")),
-            ("Metric CRS", "EPSG:32645 (UTM 45N)"),
+            ("Metric CRS", exp.get("metric_crs") or "Not recorded"),
             ("Not evaluated", ", ".join(unavailable) if unavailable else "None reported"),
         ], mono_keys=("Mask artifact", "Mask class"))))
 

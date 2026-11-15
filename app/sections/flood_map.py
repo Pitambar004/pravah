@@ -27,7 +27,7 @@ def render_flood_map_section(ctx: AppContext) -> None:
         n_avail = len(available)
         st.caption(
             f"{n_avail} of {len(layers)} layers have data in this run · display CRS EPSG:4326 · "
-            "metric calculations in EPSG:32645"
+            f"metric calculations in {(a.exposure_summary or {}).get('metric_crs', 'the recorded run CRS')}"
         )
     with t_r:
         export = {
@@ -52,6 +52,18 @@ def render_flood_map_section(ctx: AppContext) -> None:
 
     render_map_workspace(layers, height=720, mode="full", synthetic=a.is_synthetic)
 
+    if not a.remote_source and (a.folder / "comparison/comparison.png").exists():
+        with st.expander("Actual imagery, prediction and reference comparison", expanded=True):
+            st.image(str(a.folder / "comparison/comparison.png"), width="stretch")
+    if not a.remote_source:
+        files = [name for name in ["observed_water.tif", "water_probability.tif", "observed_metadata.json",
+                                  "exposure_summary.json"] if (a.folder / name).is_file()]
+        if files:
+            with st.expander("Download run files"):
+                for name in files:
+                    st.download_button(name, data=(a.folder / name).read_bytes(),
+                                       file_name=f"{a.run_id}_{name}", key=f"dl_{name}")
+
     tab_layers, tab_features, tab_change = st.tabs(["Layer catalogue", "Water feature attributes", "Pre/post change"])
     with tab_layers:
         st.dataframe(
@@ -61,7 +73,7 @@ def render_flood_map_section(ctx: AppContext) -> None:
                     "Group": layer.group,
                     "Type": KIND_LABELS.get(layer.kind, layer.kind),
                     "Status": "Available" if layer.available else "Unavailable",
-                    "Features": len(layer.data["features"]) if layer.available else None,
+                    "Features": len((layer.data or {}).get("features", [])) if layer.available else None,
                     "Source / reason": layer.source if layer.available else layer.unavailable_reason,
                 }
                 for layer in layers
