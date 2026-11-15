@@ -1,0 +1,49 @@
+# Experiment A — baseline U-Net training on ONE Team 12 GB10 (1 GPU, WORLD_SIZE=1).
+# Launched through torchrun like the 2-node run so launcher overhead is comparable.
+# Keep GLOBAL_BATCH / EPOCHS / MAX_STEPS / PAIRS identical to 05_train_2node_ddp for a fair comparison.
+# Writes /data/outputs/training/<RUN_ID>/ (train_metrics.csv, training_summary.json, checkpoint_last.pt);
+# the dashboard "Model Training" page reads that folder live (PRAVAH_TRAINING_DIR).
+# TEMPLATE — render with scripts/fuzzball/render_workflow.py; NOT validated on v4.3.1 yet.
+version: v4
+
+volumes:
+  dataset:
+    use: "{{VOLUME_PROVISIONER}}"
+    name: "{{VOLUME_NAME}}"
+
+jobs:
+  train-1node:
+    image:
+      uri: "{{API_IMAGE}}"
+    mounts:
+      /data:
+        volume: dataset
+    env:
+      - PYTHONUNBUFFERED=1
+    command:
+      - torchrun
+      - --nnodes=1
+      - --nproc-per-node=1
+      - /opt/pravah/scripts/train_ddp.py
+      - --pairs
+      - "{{PAIRS}}"
+      - --output-dir
+      - /data/outputs/training/{{RUN_ID}}
+      - --device
+      - cuda
+      - --global-batch-size
+      - "{{GLOBAL_BATCH}}"
+      - --epochs
+      - "{{EPOCHS}}"
+      - --max-steps
+      - "{{MAX_STEPS}}"
+      - --run-label
+      - "{{RUN_ID}}"
+    resource:
+      cpu:
+        cores: 8
+        affinity: NUMA
+      memory:
+        size: 32GiB
+      devices:
+        nvidia.com/gpu: 1

@@ -30,6 +30,11 @@ class Settings:
     max_queued_jobs: int
     # URL prefix a Fuzzball path endpoint may forward (``/endpoints/<id>``); stripped before routing.
     root_path: str = ""
+    # "dn" (Sen1Floods11 / raw L1C) or "reflectance" (P3 s2_l1c_reflectance.tif); see engine docs.
+    input_units: str = "dn"
+    # OSM thematic layers (buildings/roads/bridges .gpkg) for automatic exposure after each run; None = skip
+    osm_dir: Path | None = None
+    osm_date: str = "unknown"
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -47,6 +52,9 @@ class Settings:
             api_token=token,
             max_queued_jobs=int(os.environ.get("PRAVAH_MAX_QUEUED_JOBS", "8")),
             root_path=_root_path(),
+            input_units=os.environ.get("PRAVAH_INPUT_UNITS", "dn"),
+            osm_dir=Path(os.environ["PRAVAH_OSM_DIR"]) if os.environ.get("PRAVAH_OSM_DIR") else None,
+            osm_date=os.environ.get("PRAVAH_OSM_DATE", "unknown"),
         )
 
 

@@ -59,3 +59,17 @@ python scripts/exposure.py --mask outputs/stitched/observed_water.tif --building
 ```
 
 The `download_assets.py` manifest contains real provider URLs; do not commit signed URLs or secrets. These commands are templates that will fail until source-verified paths exist. `scripts/discover_stac.py` requires optional `.[catalog]`.
+
+## Prediction vs Reality, live maps, alerts and GB10 training
+
+```bash
+python scripts/validate_prediction.py --prediction outputs/<pred_run> --reference outputs/<post_run> --baseline outputs/<pre_run> --target new_water --event-time <UTC>
+PRAVAH_TRAINING_DIR=/data/outputs/training streamlit run app/Home.py
+```
+
+- `docs/PREDICTION_CONTRACT.md` — the files a forecast model must write so its prediction can be scored against post-event Sentinel-2 water, with cutoff/leakage checks and a persistence baseline.
+- `docs/TRAINING_GB10.md` — 1-node vs 2-node GB10 training templates (`workflows/fuzzball/05_train_*.yaml.tmpl`, unverified on v4.3.1) and how the dashboard compares them.
+- `docs/USING_YOUR_MODEL.md` — running a trained checkpoint on a Sentinel-2 scene and loading the run in the dashboard.
+- `docs/DATA_LAYERS.md` — where each dashboard map layer comes from and how to regenerate it.
+- Sidebar pages: **Rasuwa operations** (Rasuwa Operations, Simulate Rasuwa flood, Glacier & Lake Watch) and **Model evidence** (Prediction vs Reality, Maps, Live Prediction, Alerts (simulated, never sent), Training). Other pages stay reachable by URL.
+- The dashboard never shows synthetic fixtures by default. The "Show synthetic fixtures" toggle exists only when `PRAVAH_ENABLE_TEST_FIXTURES=1` (developer tests), and runs marked `is_synthetic` are refused.

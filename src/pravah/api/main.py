@@ -26,6 +26,8 @@ import hmac
 import json
 import os
 import re
+import subprocess
+import sys
 import threading
 from collections.abc import Callable
 from contextlib import asynccontextmanager
@@ -55,6 +57,46 @@ DOWNLOADABLE = {
 }
 
 EngineFactory = Callable[[Settings], InferenceEngine]
+SCENE_SIDECAR_KEYS = ("scene_id", "product_id", "acquired_at_utc", "available_at_utc", "availability_basis",
+                      "sensor", "processing_level")
+EXPOSURE_SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "exposure.py"
+
+
+def scene_sidecar(scene: Path) -> dict[str, Any]:
+    """Acquisition metadata from ``<scene>.json`` next to the GeoTIFF (e.g. a copied observed_metadata.json)."""
+    side = scene.with_suffix(".json")
+    if not side.is_file():
+        return {}
+    try:
+        md = json.loads(side.read_text())
+    except (OSError, ValueError):
+        return {}
+    return {k: md[k] for k in SCENE_SIDECAR_KEYS if k in md}
+
+
+def run_exposure(settings: Settings, run_dir: Path) -> str:
+    """Buildings/roads/bridges inside the new water mask (scripts/exposure.py). Never fails the job."""
+    osm = settings.osm_dir
+    if osm is None or not osm.is_dir():
+        return "skipped: PRAVAH_OSM_DIR not set or missing"
+    if not EXPOSURE_SCRIPT.is_file():
+        return "skipped: scripts/exposure.py not in this image"
+    args = [sys.executable, str(EXPOSURE_SCRIPT), "--mask", str(run_dir / "observed_water.tif"),
+            "--osm-date", settings.osm_date, "--out", str(run_dir / "exposure_summary.json"),
+            "--polygons-out", str(run_dir / "exposure_water_polygons.geojson"), "--features-dir", str(run_dir)]
+    for flag, name in (("--buildings", "buildings"), ("--roads", "roads"), ("--bridges", "bridges"),
+                       ("--settlements", "settlements"), ("--schools", "schools"), ("--healthcare", "healthcare"),
+                       ("--emergency-facilities", "emergency_facilities")):
+        if (osm / f"{name}.gpkg").is_file():
+            args += [flag, str(osm / f"{name}.gpkg")]
+    try:
+        r = subprocess.run(args, capture_output=True, text=True, timeout=900, check=False)
+    except subprocess.TimeoutExpired:
+        return "failed: exposure timed out"
+    if r.returncode == 0:
+        return "done"
+    lines = (r.stderr or "").strip().splitlines()
+    return f"failed: {lines[-1] if lines else f'exit {r.returncode}'}"
 
 
 def _default_engine_factory(s: Settings) -> InferenceEngine:
@@ -138,12 +180,16 @@ def create_app(settings: Settings | None = None, engine_factory: EngineFactory |
         scene = _safe_scene(settings, job.scene_id)
         result = engine.predict(
             scene, settings.outputs_dir / job.run_id, run_id=job.run_id, threshold=job.threshold,
-            progress=progress, extra_metadata={"scene_id": job.scene_id, "job_id": job.job_id},
+            progress=progress, extra_metadata={"scene_id": job.scene_id, "job_id": job.job_id,
+                                               **scene_sidecar(scene)},
+            input_units=settings.input_units,
         )
+        exposure = run_exposure(settings, settings.outputs_dir / job.run_id)
         md = result.metadata
         return {"files": result.files, "timings_seconds": md["timings_seconds"], "runtime": md["runtime"],
                 "water_pixel_count": md["water_pixel_count"], "water_area_m2": md["water_area_m2"],
-                "valid_pixel_count": md["valid_pixel_count"], "tile_count": md["tile_count"]}
+                "valid_pixel_count": md["valid_pixel_count"], "tile_count": md["tile_count"],
+                "exposure": exposure}
 
     holder: dict[str, JobQueue] = {}
 
@@ -170,6 +216,12 @@ def create_app(settings: Settings | None = None, engine_factory: EngineFactory |
     def jobs() -> JobQueue:
         return holder["q"]
 
+    @app.get("/")
+    def root() -> dict[str, str]:
+        return {"service": "PRAVAH model service (no web page here)",
+                "dashboard": "Open the Streamlit app (default http://localhost:8501) → Live Prediction",
+                "status": "/api/v1/status", "api_docs": "/docs"}
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
@@ -187,6 +239,7 @@ def create_app(settings: Settings | None = None, engine_factory: EngineFactory |
             "model_error": err,
             "runtime": engine.runtime() if engine else None,
             "require_cuda": settings.require_cuda,
+            "input_units": settings.input_units,
             "storage": {
                 "data_root": _dir_state(settings.data_root),
                 "scenes_dir": _dir_state(settings.scenes_dir),

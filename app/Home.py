@@ -53,11 +53,19 @@ if _PASSCODE and not st.session_state.get("pv_authed"):
         st.error("Incorrect passcode")
     st.stop()
 
-# Pages (route names kept stable; titles follow the design brief)
+# Main pages: the only ones in the sidebar. Each maps to a project goal.
 PAGES = [
     st.Page("views/nepal_monitor.py", title="Rasuwa Operations", icon=":material/water:", url_path="nepal", default=True),
     st.Page("views/simulate.py", title="Simulate Rasuwa flood", icon=":material/play_circle:", url_path="simulate"),
     st.Page("views/lakes.py", title="Glacier & Lake Watch", icon=":material/landscape:", url_path="lakes"),
+    st.Page("views/validation.py", title="Prediction vs Reality", icon=":material/fact_check:", url_path="validation"),
+    st.Page("views/gallery.py", title="Maps", icon=":material/map:", url_path="maps"),
+    st.Page("views/live.py", title="Live Prediction", icon=":material/sensors:", url_path="live"),
+    st.Page("views/alerts.py", title="Alerts", icon=":material/campaign:", url_path="alerts"),
+    st.Page("views/training.py", title="Training", icon=":material/model_training:", url_path="training"),
+]
+# Supporting pages stay reachable by URL and in-page links but are kept out of the sidebar.
+HIDDEN_PAGES = [
     st.Page("views/overview.py", title="Model Results", icon=":material/space_dashboard:", url_path="overview"),
     st.Page("views/flood_map.py", title="Flood Intelligence Map", icon=":material/map:", url_path="map"),
     st.Page("views/replay.py", title="Historical Replay", icon=":material/history:", url_path="replay"),
@@ -68,7 +76,7 @@ PAGES = [
     st.Page("views/compute.py", title="Compute & Performance", icon=":material/memory:", url_path="compute"),
     st.Page("views/methodology.py", title="Sources & Methodology", icon=":material/menu_book:", url_path="methodology"),
 ]
-current = st.navigation(PAGES, position="hidden")
+current = st.navigation(PAGES + HIDDEN_PAGES, position="hidden")
 OPERATIONS = {"Rasuwa Operations", "Simulate Rasuwa flood", "Glacier & Lake Watch"}
 operating_page = current.title in OPERATIONS
 
@@ -87,13 +95,13 @@ with st.sidebar:
         '<span class="pv-brand-deva" lang="ne">प्रवाह</span></div>'
         '<div class="pv-brand-sub">Flood Intelligence Platform</div></div></div>'
     )
-    html('<div class="pv-nav-label">Workspace</div>')
-    for page in PAGES:
-        if page.title in OPERATIONS:
-            st.page_link(page, label=page.title, icon=page.icon)
+    for label, in_group in (("Rasuwa operations", True), ("Model evidence", False)):
+        html(f'<div class="pv-nav-label">{label}</div>')
+        for page in PAGES:
+            if (page.title in OPERATIONS) == in_group:
+                st.page_link(page, label=page.title, icon=page.icon)
 
-    if not operating_page:
-        html('<div class="pv-side-divider"></div><div class="pv-nav-label">Model result source</div>')
+    html('<div class="pv-side-divider"></div>')
     runs = discover_available_runs(OUTPUTS_DIR)
     local_real = [r for r in runs if run_has_artifacts(OUTPUTS_DIR / r)]
     runs = sorted(local_real, key=lambda run: (OUTPUTS_DIR / run).stat().st_mtime, reverse=True)
@@ -112,25 +120,34 @@ with st.sidebar:
         st.session_state["pv_requested_run"] = requested_run
     if st.session_state.get("pv_run") not in (None, *options):
         st.session_state.pop("pv_run")  # run disappeared from storage
-    if use_remote:
-        chosen = (st.session_state.get("pv_run") or remote_runs[0]) if operating_page else st.selectbox("Run · inference API", remote_runs, key="pv_run",
-                              help=f"Completed runs served by {api_client.api_url()}")
-        run_folder = None
-    elif runs:
-        chosen = (st.session_state.get("pv_run") or runs[0]) if operating_page else st.selectbox("Run", runs, key="pv_run", help=f"Run folders discovered under {OUTPUTS_DIR}/")
-        run_folder = str(OUTPUTS_DIR / chosen)
-    else:
-        run_folder = str(OUTPUTS_DIR / "latest") if operating_page else st.text_input("Run folder", str(OUTPUTS_DIR / "latest"),
-                                   help=f"No run folders found under {OUTPUTS_DIR}/")
-    if source_pref == "api" and not remote_runs:
-        st.caption(f"No completed runs from the inference API{': ' + remote_err if remote_err else ''}")
-    # Test fixtures require an explicit developer flag and manual opt-in.
+    # Test fixtures require an explicit developer flag and manual opt-in; never on by default.
     st.session_state.setdefault("pv_demo", False)
-    if os.environ.get("PRAVAH_ENABLE_TEST_FIXTURES") == "1":
-        use_demo = st.toggle("Show synthetic fixtures", key="pv_demo", help="Developer tests only")
-    else:
-        use_demo = False
+    fixtures_enabled = os.environ.get("PRAVAH_ENABLE_TEST_FIXTURES") == "1"
+    if not fixtures_enabled:
         st.session_state["pv_demo"] = False
+    if operating_page:
+        # Operations pages read their own public-source bundles; keep the model run implicit.
+        chosen = st.session_state.get("pv_run") or (options[0] if options else None)
+        run_folder = None if use_remote or not runs else str(OUTPUTS_DIR / chosen)
+        use_demo = bool(st.session_state["pv_demo"])
+    else:
+        with st.expander("Data source", expanded=False):
+            if use_remote:
+                chosen = st.selectbox("Run · inference API", remote_runs, key="pv_run",
+                                      help=f"Completed runs served by {api_client.api_url()}")
+                run_folder = None
+            elif runs:
+                chosen = st.selectbox("Run", runs, key="pv_run", help=f"Run folders discovered under {OUTPUTS_DIR}/")
+                run_folder = str(OUTPUTS_DIR / chosen)
+            else:
+                run_folder = st.text_input("Run folder", str(OUTPUTS_DIR / "latest"),
+                                           help=f"No run folders found under {OUTPUTS_DIR}/")
+            if source_pref == "api" and not remote_runs:
+                st.caption(f"No completed runs from the inference API{': ' + remote_err if remote_err else ''}")
+            if fixtures_enabled:
+                use_demo = st.toggle("Show synthetic fixtures", key="pv_demo", help="Developer tests only")
+            else:
+                use_demo = False
 
 if use_remote and not use_demo:
     artifacts = load_remote_run(chosen)
@@ -144,20 +161,14 @@ if not use_demo and any((item or {}).get("is_synthetic") for item in
     st.stop()
 
 with st.sidebar:
-    label, variant = ctx.data_status
     if operating_page:
-        html('<div class="pv-side-divider"></div><div class="pv-side-meta"><span>Office view</span><span>Rasuwa</span></div>'
+        html('<div class="pv-side-meta"><span>Office view</span><span>Rasuwa</span></div>'
              '<div class="pv-side-meta"><span>Monitoring</span><span>Rivers · lakes · assets</span></div>'
              '<div class="pv-side-meta"><span>Mode</span><span>Experimental</span></div>'
              f'<div class="pv-side-footer"><strong>PRAVAH · Team 12</strong><br>v{APP_VERSION} · public-source watches</div>')
     else:
-        html(
-        f'<div class="pv-side-meta"><span>Status</span><span class="pv-badge pv-badge-{variant}"><span class="dot"></span>{label}</span></div>'
-        f'<div class="pv-side-meta"><span>Run</span><span class="pv-mono" title="{escape(artifacts.run_id)}">{escape(artifacts.run_id)}</span></div>'
-        + (f'<div class="pv-side-meta"><span>Source</span><span class="pv-mono" title="{escape(artifacts.remote_source)}">'
-           f'API</span></div>' if artifacts.remote_source else "")
-        + f'<div class="pv-side-footer"><strong>Team 12</strong> · CIQ Hackathon 2026<br>v{APP_VERSION} · retrospective prototype</div>'
-    )
+        html(f'<div class="pv-side-footer"><strong>Team 12</strong> · CIQ Hackathon 2026<br>'
+             f'v{APP_VERSION} · retrospective prototype</div>')
 
 if artifacts.errors and not operating_page:
     render_callout(

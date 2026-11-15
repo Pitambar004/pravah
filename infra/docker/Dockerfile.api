@@ -25,6 +25,8 @@ RUN pip install "fastapi>=0.110" "uvicorn[standard]>=0.29" "rasterio>=1.3" "shap
 COPY pyproject.toml README.md ./
 COPY src ./src
 COPY scripts/fuzzball/gpu_smoke.py ./scripts/fuzzball/gpu_smoke.py
+# Same image runs training (workflows/fuzzball/05_train_*.yaml.tmpl); torchrun ships with torch.
+COPY scripts/train_ddp.py ./scripts/train_ddp.py
 RUN pip install --no-deps . && python -c "import pravah.api.main, pravah.inference"
 
 # Fuzzball runs workloads unprivileged; code stays world-readable, data lives on /data.

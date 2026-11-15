@@ -31,7 +31,16 @@ DEFAULTS = {
     "VOLUME_NAME": "Pravah-Dataset",
     "CHECKPOINT": "/data/models/checkpoints/checkpoint_last.pt",
     "ENDPOINT_SCOPE": "group",
+    # Training (05_train_*): identical defaults for 1-node and 2-node so the workloads match.
+    "PAIRS": "/data/manifests/s2_pairs.json",
+    "GLOBAL_BATCH": "8",
+    "EPOCHS": "3",
+    "MAX_STEPS": "0",
+    "MASTER_PORT": "29500",
+    # 06_inference_batch: "reflectance" for P3 s2_l1c_reflectance.tif, "dn" for raw L1C / Sen1Floods11 chips
+    "INPUT_UNITS": "dn",
 }
+MULTINODE_IMPLEMENTATIONS = {"generic", "openmpi", "mpich"}
 SCOPES = {"user", "group", "organization", "public"}
 SAFE_ID = re.compile(r"^[A-Za-z0-9_-]{1,96}$")
 SAFE_SCENE = re.compile(r"^(?!/)(?!.*\.\.)[A-Za-z0-9_./-]+\.tiff?$")
@@ -58,8 +67,19 @@ def _check_value(key: str, value: str) -> None:
         raise RenderError("RUN_ID may only contain letters, digits, '_' and '-'")
     if key == "SCENE_ID" and not SAFE_SCENE.match(value):
         raise RenderError("SCENE_ID must be a relative .tif path under /data/raw/sentinel2 without '..'")
-    if key == "CHECKPOINT" and not value.startswith("/data/"):
-        raise RenderError("CHECKPOINT must live on the mounted volume (/data/...)")
+    if key in ("CHECKPOINT", "PAIRS") and (not value.startswith("/data/") or ".." in value or " " in value):
+        raise RenderError(f"{key} must live on the mounted volume (/data/...) without '..' or spaces")
+    if key == "INPUT_UNITS" and value not in ("dn", "reflectance"):
+        raise RenderError("INPUT_UNITS must be dn or reflectance")
+    if key in ("GLOBAL_BATCH", "EPOCHS", "MAX_STEPS", "MASTER_PORT"):
+        if not value.isdigit():
+            raise RenderError(f"{key} must be a non-negative integer")
+        if key in ("GLOBAL_BATCH", "EPOCHS") and int(value) < 1:
+            raise RenderError(f"{key} must be >= 1")
+        if key == "GLOBAL_BATCH" and int(value) % 2:
+            raise RenderError("GLOBAL_BATCH must be even so 1-node and 2-node runs share the same workload")
+        if key == "MASTER_PORT" and not 1024 <= int(value) <= 65535:
+            raise RenderError("MASTER_PORT must be 1024-65535")
 
 
 def validate(doc: dict[str, Any]) -> list[str]:
@@ -83,6 +103,16 @@ def validate(doc: dict[str, Any]) -> list[str]:
         if "cores" not in (res.get("cpu") or {}) or "size" not in (res.get("memory") or {}):
             raise RenderError(f"{name}: resource.cpu.cores and resource.memory.size are required")
         gpus = (res.get("devices") or {}).get("nvidia.com/gpu")
+        mn = u.get("multinode")
+        if mn is not None:
+            if not isinstance(mn.get("nodes"), int) or mn["nodes"] < 2:
+                raise RenderError(f"{name}: multinode.nodes must be an integer >= 2")
+            if mn.get("implementation") not in MULTINODE_IMPLEMENTATIONS:
+                raise RenderError(f"{name}: multinode.implementation must be one of {sorted(MULTINODE_IMPLEMENTATIONS)}")
+            notes.append(f"{name}: multinode nodes={mn['nodes']} implementation={mn['implementation']} "
+                         f"(gpus per node={gpus or 0}) — confirm 4.3.1 syntax with CIQ")
+        if not (u.get("command") or u.get("script")):
+            raise RenderError(f"{name}: needs command or script")
         notes.append(f"{name}: image={uri} gpus={gpus or 0}")
         net = u.get("network") or {}
         ports = {p["name"] for p in net.get("ports") or []}

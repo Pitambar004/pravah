@@ -3,9 +3,12 @@
 Contract (matches ``docs/contracts.md`` and ``scripts/stitch.py``):
 
 * Input: georeferenced 13-band S2 L1C (bands selected by ``S2_INDEXES``) or a
-  6-band raster already ordered ``[B2, B3, B4, B8A, B11, B12]``. Reflectance is
-  scaled ``/10000`` and clipped to ``[0, 1]`` — the project U-Net baseline
-  scaling, *not* Prithvi preprocessing. Sentinel-1 SAR is rejected by band count.
+  6-band raster already ordered ``[B2, B3, B4, B8A, B11, B12]``. With
+  ``input_units="dn"`` (default, Sen1Floods11 style) values are scaled ``/10000``;
+  with ``input_units="reflectance"`` (already-scaled TOA reflectance, e.g. the P3
+  ``s2_l1c_reflectance.tif``) they are used as-is. Both are clipped to ``[0, 1]`` —
+  the project U-Net baseline scaling, *not* Prithvi preprocessing. A raster whose
+  value range contradicts the declared units is refused. Sentinel-1 SAR is rejected by band count.
 * Output, in the source CRS and pixel grid:
   ``observed_water.tif`` (uint8: 0 no water, 1 model-inferred water, 255 invalid),
   ``invalid_mask.tif`` (uint8: 1 invalid), ``water_probability.tif``
@@ -72,8 +75,14 @@ def resolve_device(preference: str = "auto", require_cuda: bool = False) -> torc
     ``require_cuda`` (set on Fuzzball GPU services) makes a missing CUDA runtime
     a hard error instead of a quiet CPU fallback.
     """
-    if preference not in ("auto", "cpu", "cuda"):
-        raise ValueError("device must be auto, cpu or cuda")
+    if preference not in ("auto", "cpu", "cuda", "mps"):
+        raise ValueError("device must be auto, cpu, cuda or mps")
+    if preference == "mps":  # Apple-silicon laptop GPU; never reported as CUDA
+        if require_cuda:
+            raise RuntimeError("require_cuda conflicts with device=mps")
+        if not torch.backends.mps.is_available():
+            raise RuntimeError("MPS requested but torch.backends.mps.is_available() is False")
+        return torch.device("mps")
     cuda = torch.cuda.is_available()
     if (require_cuda or preference == "cuda") and not cuda:
         raise RuntimeError("CUDA required but torch.cuda.is_available() is False; refusing CPU fallback")
@@ -169,6 +178,21 @@ def _pixel_area_m2(crs, transform) -> float | None:
     return abs(transform.a * transform.e) * factor * factor
 
 
+INPUT_UNITS = ("dn", "reflectance")
+
+
+def check_input_units(sample: np.ndarray, units: str) -> None:
+    """Refuse obviously mismatched scaling (e.g. reflectance fed as DN -> near-black input)."""
+    vals = sample[np.isfinite(sample) & (sample > 0)]
+    if vals.size < 100:
+        return
+    p99 = float(np.percentile(vals, 99))
+    if units == "dn" and p99 <= 2.0:
+        raise ValueError(f"Input looks like reflectance (99th percentile {p99:.3f}); use input_units='reflectance'")
+    if units == "reflectance" and p99 > 10.0:
+        raise ValueError(f"Input looks like DN (99th percentile {p99:.0f}); use input_units='dn'")
+
+
 @dataclass
 class PredictionResult:
     run_id: str
@@ -217,9 +241,13 @@ class InferenceEngine:
         max_polygons: int = 5000,
         progress: ProgressFn | None = None,
         extra_metadata: dict[str, Any] | None = None,
+        input_units: str = "dn",
     ) -> PredictionResult:
         if not 0.0 <= threshold <= 1.0:
             raise ValueError("threshold must be within [0, 1]")
+        if input_units not in INPUT_UNITS:
+            raise ValueError(f"input_units must be one of {INPUT_UNITS}")
+        divisor = 10000.0 if input_units == "dn" else 1.0
         src_path = Path(raster_path)
         out = Path(output_dir)
         out.mkdir(parents=True, exist_ok=True)
@@ -245,6 +273,10 @@ class InferenceEngine:
             pad_to = int(math.ceil(tile_size / 8) * 8)
             profile = src.profile.copy()
             crs, transform = src.crs, src.transform
+            # Units check on a central window before any compute
+            cw = Window(max(0, w // 2 - 256), max(0, h // 2 - 256), min(512, w), min(512, h))
+            check_input_units(src.read(band_idx, window=cw, masked=True).astype(np.float32).filled(np.nan),
+                              input_units)
 
             done = 0
             for start in range(0, len(tiles), self.batch_size):
@@ -252,7 +284,7 @@ class InferenceEngine:
                 arrays, masks = [], []
                 for t in batch:
                     win = Window(t["col_off"], t["row_off"], t["width"], t["height"])
-                    x = np.clip(src.read(band_idx, window=win).astype(np.float32) / 10000.0, 0.0, 1.0)
+                    x = np.clip(src.read(band_idx, window=win).astype(np.float32) / divisor, 0.0, 1.0)
                     x = np.nan_to_num(x, nan=0.0)
                     masks.append(src.dataset_mask(window=win) > 0)
                     xp = np.zeros((6, pad_to, pad_to), dtype=np.float32)
@@ -264,6 +296,8 @@ class InferenceEngine:
                     probs = F.softmax(self.model(xb), dim=1)[:, 1]
                     if on_gpu:
                         torch.cuda.synchronize(self.device)
+                    elif self.device.type == "mps":
+                        torch.mps.synchronize()
                     probs = probs.float().cpu().numpy()
                 compute_s += time.perf_counter() - t0
                 for t, prob, valid in zip(batch, probs, masks):
@@ -317,7 +351,9 @@ class InferenceEngine:
             "raster_width": w,
             "raster_height": h,
             "bands_used": BANDS,
-            "input_scaling": "reflectance / 10000, clipped to [0, 1] (baseline U-Net scaling)",
+            "input_units": input_units,
+            "input_scaling": ("DN / 10000" if input_units == "dn" else "reflectance as-is")
+            + ", clipped to [0, 1] (baseline U-Net scaling)",
             "threshold": threshold,
             "tile_size": tile_size,
             "overlap": overlap,

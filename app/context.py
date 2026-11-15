@@ -18,6 +18,9 @@ CASE_STUDY = {
     "region": "Rasuwa, Nepal",
     "corridor": "Bhote Koshi–Trishuli corridor",
     "event_date": "26 Aug 2026",
+    # Start of the event day in Nepal time (00:00 NPT = 18:15 UTC the day before). Used only to sort
+    # runs into before/after; the exact onset time is not recorded in this repository.
+    "event_day_start_utc": "2026-08-25T18:15:00Z",
 }
 
 _KEY = "pv_context"

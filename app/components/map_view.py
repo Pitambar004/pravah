@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 from urllib.parse import quote
@@ -23,8 +24,18 @@ from pravah.configuration import configured_url
 RASUWA_CENTER = [28.150, 85.350]
 LEAFLET_VERSION = "1.9.4"
 
-GROUP_ORDER = ["Geographic context", "Satellite evidence", "Change vs pre-event", "Infrastructure", "Scenarios",
-               "Validation"]
+GROUP_ORDER = ["Geographic context", "Prediction", "Prediction vs observed", "Satellite evidence",
+               "Change vs pre-event", "Infrastructure", "Scenarios", "Validation"]
+
+# Agreement classes of a scored prediction (pravah.analysis.prediction_validation)
+AGREEMENT_STYLE = {
+    "hit": ("Correctly predicted (hit)", TOKENS["success"],
+            "Predicted flood AND observed water in the post-event image."),
+    "false_alarm": ("False alarm", TOKENS["warning"],
+                    "Predicted flood, but the post-event image shows no water here."),
+    "miss": ("Missed flooding", TOKENS["danger"],
+             "Observed water in the post-event image that the prediction did not flag."),
+}
 
 KIND_LABELS = {
     "context": "Context",
@@ -33,6 +44,7 @@ KIND_LABELS = {
     "derived": "Derived exposure",
     "scenario": "Exploratory scenario",
     "reference": "Retrospective reference",
+    "prediction": "Model prediction",
 }
 
 BASEMAPS = {
@@ -151,7 +163,7 @@ def _change_layers(artifacts: Any) -> list[MapLayer]:
     limit = ("Change between two model outputs on pixels cloud-free on both dates. Cloud/terrain shadow and "
              "different viewing geometry can create apparent change. Not a forecast.")
     return [
-        MapLayer(id="change_new", name="Water newly detected", group="Change vs pre-event", kind="model",
+        MapLayer(id="change_new", name="New water (vs before)", group="Change vs pre-event", kind="model",
                  color=TOKENS["danger"], data=_slim_geojson(getattr(artifacts, "change_new_water_geojson", None)),
                  opacity=0.6, source=src, timestamp=span,
                  description="Pixels classed no-water on the pre-event date and water on the post-event date.",
@@ -166,8 +178,8 @@ def _change_layers(artifacts: Any) -> list[MapLayer]:
 
 def _exposure_layers(artifacts: Any, fixture: str) -> list[MapLayer]:
     feats = getattr(artifacts, "exposure_features", None) or {}
-    specs = [("buildings", "Buildings in mapped extent", "OSM building footprints intersecting the mapped water extent."),
-             ("roads", "Roads in mapped extent", "OSM highway segments clipped to the mapped water extent."),
+    specs = [("buildings", "Buildings in water", "OSM building footprints intersecting the mapped water extent."),
+             ("roads", "Roads in water", "OSM highway segments clipped to the mapped water extent."),
              ("bridges", "Bridges in mapped extent", "OSM bridge-tagged ways intersecting the mapped water extent.")]
     exp = getattr(artifacts, "exposure_summary", None) or {}
     osm_date = exp.get("osm_snapshot_timestamp") or exp.get("source_snapshot") or "—"
@@ -179,6 +191,74 @@ def _exposure_layers(artifacts: Any, fixture: str) -> list[MapLayer]:
                  unavailable_reason="No exposure feature layer exported")
         for cat, name, desc in specs
     ]
+
+
+def prediction_layers(artifacts: Any, group_pred: str = "Prediction",
+                      group_eval: str = "Prediction vs observed") -> list[MapLayer]:
+    """Predicted flood extent plus hit / false-alarm / miss layers for a scored prediction run."""
+    pm = getattr(artifacts, "prediction_metadata", None)
+    if not pm:
+        return []
+    fixture = " (synthetic fixture)" if getattr(artifacts, "is_synthetic", False) else ""
+    cutoff = pm.get("input_cutoff_utc") or "—"
+    layers = [MapLayer(
+        id=f"pred_{artifacts.run_id}", name="Predicted flood extent", group=group_pred, kind="prediction",
+        color=TOKENS["scenario"], data=_slim_geojson(getattr(artifacts, "predicted_flood_geojson", None)),
+        opacity=0.5, source=f"{artifacts.run_id}/predicted_flood · {pm.get('model_id') or 'model not recorded'}{fixture}",
+        timestamp=f"inputs up to {cutoff}",
+        description=pm.get("description") or "Where the model expected flooding, using only data available before "
+        "its input cutoff.",
+        limitation="A prediction, not an observation. Scored on the Prediction vs Reality page.",
+        unavailable_reason="No predicted_flood.geojson (run scripts/validate_prediction.py to vectorise)")]
+    for ref_id, classes in (getattr(artifacts, "agreement_layers", None) or {}).items():
+        for cls, (name, color, desc) in AGREEMENT_STYLE.items():
+            layers.append(MapLayer(
+                id=f"ag_{cls}_{ref_id}", name=f"{name} · {short_run_label(ref_id)}", group=group_eval, kind="model",
+                color=color, data=_slim_geojson(classes.get(cls)), opacity=0.65,
+                source=f"{artifacts.run_id}/validation/{ref_id}/agreement_{cls}.geojson",
+                timestamp=f"prediction vs {ref_id}", description=desc,
+                limitation="Agreement with a model-derived optical observation, not field-verified ground truth.",
+                unavailable_reason="No pixels in this class"))
+    return layers
+
+
+def short_run_label(run_id: str) -> str:
+    """'p3_prithvi_nepal_20260827_T45RUL' -> '2026-08-27 · T45RUL' (falls back to the id)."""
+    m = re.search(r"(20\d{6})_(T\w{5})", run_id)
+    if not m:
+        return run_id
+    d = m.group(1)
+    return f"{d[:4]}-{d[4:6]}-{d[6:]} · {m.group(2)}"
+
+
+def run_layers(artifacts: Any, group: str, visible: bool = True) -> list[MapLayer]:
+    """Water (and change) layers of one run, placed in ``group`` — used for all-runs maps."""
+    if getattr(artifacts, "prediction_metadata", None):
+        return prediction_layers(artifacts, group, group)
+    meta = artifacts.observed_metadata or {}
+    acq = meta.get("acquired_at_utc") or "—"
+    rid = artifacts.run_id
+    layers = [MapLayer(
+        id=f"water_{rid}", name="Water detected", group=group, kind="model", color=TOKENS["map_water"],
+        data=_slim_geojson(artifacts.water_geojson), opacity=0.55, visible=visible,
+        source=f"{rid}/observed_water · {meta.get('model_id') or meta.get('model') or '—'}",
+        timestamp=acq, description=f"Model-derived water in Sentinel-2 scene {meta.get('scene_id') or '—'}.",
+        limitation="Model output on one optical scene; cloud/shadow pixels are invalid, not dry.",
+        unavailable_reason="No water polygons in this run")]
+    for lyr in _change_layers(artifacts):
+        lyr.id, lyr.group, lyr.visible = f"{lyr.id}_{rid}", group, visible and lyr.id == "change_new"
+        layers.append(lyr)
+    return layers
+
+
+def build_multi_run_layers(runs: list[Any], base: Any, title_for=None) -> list[MapLayer]:
+    """Context from ``base`` plus every run's layers, one group per run (oldest first)."""
+    title_for = title_for or (lambda a: short_run_label(a.run_id))
+    ctx = [lyr for lyr in build_layers(base, show_retrospective=False) if lyr.group == "Geographic context"]
+    out = list(ctx)
+    for i, a in enumerate(runs):
+        out += run_layers(a, title_for(a), visible=i >= len(runs) - 2)
+    return out
 
 
 def build_layers(artifacts: Any, show_retrospective: bool = True) -> list[MapLayer]:
@@ -200,7 +280,7 @@ def build_layers(artifacts: Any, show_retrospective: bool = True) -> list[MapLay
         _context_layer(artifacts, "admin_boundaries", "admin", "Administrative boundaries", TOKENS["text_muted"]),
         _context_layer(artifacts, "rivers", "rivers", "River network", TOKENS["map_water"]),
         MapLayer(
-            id="water", name="Model-derived water extent", group="Satellite evidence", kind="model",
+            id="water", name="Water detected", group="Satellite evidence", kind="model",
             color=TOKENS["map_water"], data=_slim_geojson(artifacts.water_geojson), opacity=0.55,
             source=(meta.get("source_raster") or "observed_water.tif → polygons") + fixture,
             timestamp=meta.get("acquired_at_utc") or meta.get("created_at_utc") or "See run metadata",
@@ -215,6 +295,7 @@ def build_layers(artifacts: Any, show_retrospective: bool = True) -> list[MapLay
                         "bounds": (meta.get("scene_preview") or {}).get("bounds")},
                  source=meta.get("source_raster", "—"), unavailable_reason="No source preview exported"),
         *_change_layers(artifacts),
+        *prediction_layers(artifacts),
         *_exposure_layers(artifacts, fixture),
     ]
     if (meta.get("case_study") or {}).get("scope") == "benchmark":
@@ -234,6 +315,16 @@ def build_layers(artifacts: Any, show_retrospective: bool = True) -> list[MapLay
             )
         )
     return layers
+
+
+# Kept out of the map panel to keep it readable (still built, so other code and tests can use them).
+MINOR_LAYER_IDS = ("admin", "imagery", "change_lost", "bridges", "susceptibility", "inundation")
+
+
+def essential_layers(layers: list[MapLayer]) -> list[MapLayer]:
+    """Only layers that have data and matter for the flood story (water, change, prediction, exposure)."""
+    return [lyr for lyr in layers
+            if lyr.available and not any(lyr.id == m or lyr.id.startswith(m + "_") for m in MINOR_LAYER_IDS)]
 
 
 def _payload(layers: list[MapLayer]) -> list[dict[str, Any]]:
@@ -258,9 +349,10 @@ def build_map_html(
     ``mode='full'`` shows the layer panel, toolbar and detail panel.
     ``mode='preview'`` shows a compact, non-scroll-zoom map with a legend only.
     """
+    layers = essential_layers(layers)
     config = {
         "layers": _payload(layers),
-        "groups": GROUP_ORDER,
+        "groups": GROUP_ORDER + [g for g in dict.fromkeys(lyr.group for lyr in layers) if g not in GROUP_ORDER],
         "basemaps": configured_basemaps(),
         "basemap": initial_basemap if initial_basemap in BASEMAPS else "dark",
         "mode": mode,
@@ -345,6 +437,7 @@ html,body{margin:0;height:100%;background:var(--bg-app);color:var(--text);font:1
 .tag.model{color:var(--accent);border-color:rgba(56,189,248,.3)}
 .tag.reference{color:var(--warning);border-color:rgba(251,191,36,.3)}
 .tag.scenario{color:var(--scenario);border-color:rgba(167,139,250,.3)}
+.tag.prediction{color:var(--scenario);border-color:rgba(167,139,250,.3)}
 .tag.derived{color:var(--warning);border-color:rgba(251,191,36,.3)}
 .opacity{display:flex;align-items:center;gap:8px;margin:6px 0 2px 26px;font-size:11px;color:var(--text-muted)}
 .opacity input{flex:1;accent-color:var(--accent);height:16px}
