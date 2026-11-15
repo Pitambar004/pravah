@@ -69,8 +69,8 @@ def _exposure_tiles(down: dict | None):
         st.info("Downstream hydraulics not run yet (needs discharge from GloFAS or the emulator).")
         return
     e = down.get("exposure", {})
-    labels = [("buildings", "Buildings in wet extent"), ("roads", "Road length (km)"), ("bridges", "Bridges"),
-              ("facilities", "Facilities"), ("settlements", "Settlement points")]
+    labels = [("buildings", "Buildings newly exposed"), ("roads", "Road newly exposed (km)"), ("bridges", "Bridges newly exposed"),
+              ("facilities", "Facilities newly exposed"), ("settlements", "Settlements newly exposed")]
     cols = st.columns(len(labels))
     for col, (k, lab) in zip(cols, labels):
         v = e.get(k)
@@ -83,7 +83,8 @@ def _exposure_tiles(down: dict | None):
     note = (f'GLOF scenario active from lake {g["lake_id"]} (peak {g["peak_m3s_low"]:.0f}–{g["peak_m3s_high"]:.0f} m³/s, '
             f'empirical envelope). ' if g else "")
     st.caption(f'{note}{down["member_count"]} ensemble members · hydraulics {down["hydraulics_seconds_measured"]} s on '
-               f'{down["device"]} (measured) · median and max across members. Screening model, not a 2-D simulation.')
+               f'{down["device"]} (measured) · median and max across members. "Newly exposed" = wet in the member but dry at this month\'s normal flow. '
+               f'Screening model, not a 2-D simulation.')
 
 
 def _reach_table(down: dict | None):

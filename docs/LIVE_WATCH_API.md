@@ -12,11 +12,19 @@ river downstream would respond.
 
 ## 1. Base URL and interactive docs
 
-The base URL is the Fuzzball endpoint named `api` of the running `pravah-watch-serve-*` workflow:
+The base URL is the Fuzzball endpoint named `api` of the running `pravah-watch-serve-*` workflow.
+Each redeploy creates a new workflow id, so always look up the current URLs:
 
 ```bash
-fuzzball workflow describe <serve-workflow-id>     # the "api" endpoint URL is the base URL
+fuzzball workflow list | grep pravah-watch-serve          # newest Started one
+fuzzball workflow endpoints <serve-workflow-id>           # prints the api and dashboard URLs
 ```
+
+The event cluster's endpoints use a TLS certificate from the event's private certificate authority. On a
+machine that does not trust that CA, browsers show a certificate warning and `curl`/`httpx` refuse to connect.
+Install the organisers' CA certificate. Do not turn off certificate verification.
+From a laptop with the Fuzzball CLI you can also use
+`fuzzball workflow port-forward <serve-workflow-id> api 18000:8000` and the base URL `http://127.0.0.1:18000`.
 
 | Page | Path |
 |---|---|
@@ -52,7 +60,7 @@ computed the replay frames, `/replay` returns `status: waiting_for_build | build
 ```jsonc
 {
   "mode": "live",
-  "updated_at_utc": "2026-11-15T18:05:00+00:00",
+  "updated_at_utc": "<ISO-8601 UTC>",
   "assessment": {
     "level": "ok | watch | warning | severe",
     "families_elevated": ["rain", "cryosphere"],      // independent hazard families at watch or above
@@ -62,43 +70,49 @@ computed the replay frames, `/replay` returns `status: waiting_for_build | build
         "family": "cryosphere",
         "label": "Glacial-lake area change (optical)",
         "status": "ok | watch | warning | severe | unknown",   // unknown = no evidence, NOT safe
-        "value": 12.4, "units": "% vs baseline",
+        "value": <number|null>, "units": "% vs baseline",
         "threshold": {"watch": 0.10, "warning": 0.25},
-        "observed_at_utc": "2026-11-14T05:02:31+00:00",
+        "observed_at_utc": "<ISO-8601 UTC of the evidence>",
         "source": "Sentinel-2 L2A",
-        "detail": "lake GLO_85.48666_28.11144: 0.027 km² vs 0.024 km²"
+        "detail": "lake <GLO id>: <current km²> vs <baseline km²>"
       }
     ]
   },
   "downstream": {
-    "member_count": 12,                                  // ensemble: discharge source × Manning n (+ GLOF members)
+    "member_count": <int>,                                  // ensemble: discharge source × Manning n (+ GLOF members)
     "reaches": [
       {
-        "reach_id": "R03", "label": "Syabrubesi", "start_km": 30, "end_km": 40,
+        "reach_id": "R03", "label": "<nearest mapped settlement>", "start_km": 30, "end_km": 40,
         "discharge_m3s": [min, median, max],
         "hydraulic_width_m": [p10, median, p90],         // Manning normal depth on DEM cross-sections
-        "empirical_width_m": 74.0,                       // W = a·Q^b fitted on 2018–2024 Sentinel-2 widths (null if no fit)
+        "empirical_width_m": <number|null>,                       // W = a·Q^b fitted on 2018–2024 Sentinel-2 widths (null if no fit)
         "width_methods_agree": true,                     // false = the two width methods differ by more than ×2
         "depth_m": [p10, median, p90],                   // above the DEM water surface, not the riverbed
         "arrival_h": [min, median, max],                 // kinematic travel time from the flood origin
-        "velocity_ms": 3.1
+        "velocity_ms": <number>
       }
     ],
-    "exposure": {
-      "buildings": {"median": 12, "max": 40, "per_reach_max": {"R03": 18}},
-      "roads": {"median": 1.2, "max": 3.4, "units": "km"},
+    "exposure": {                                        // NEWLY exposed: wet in the member, dry at this month's normal flow
+      "buildings": {"median": <n>, "max": <n>, "in_wet_extent_max": <n>, "per_reach_max": {"R03": <n>},
+                    "semantics": "newly exposed vs monthly normal flow"},
+      "roads": {"median": <km>, "max": <km>, "units": "km"},
       "bridges": {...}, "facilities": {...}, "settlements": {...}
     },
+    "normal_flow_reference": {"month": <1-12>, "station_q_m3s": {"<station id>": <m³/s>}},  // GloFAS 2016–2025 monthly median
     "glof": null,                                        // or the outburst scenario when a lake indicator fires
     "extent_median": {GeoJSON geometry}, "extent_max": {GeoJSON geometry},
     "exposed_points_max": {GeoJSON FeatureCollection},
-    "device": "cuda:0", "hydraulics_seconds_measured": 0.04
+    "device": "cuda", "hydraulics_seconds_measured": <measured s>
   },
   "evidence": {"gauges": [...], "rain": {...}, "seismic": [...], "lakes": {"s2": [...], "s1": [...]},
                "glacier": [...], "widths": [...], "discharge": [...], "latest_passes": [...]},
-  "source_errors": {"gauges": "HTTPError: ..."}          // last good evidence is kept and shown as stale
+  "source_errors": {"<source>": "<error>"}          // last good evidence is kept and shown as stale
 }
 ```
+
+Assets already "wet" at normal flow sit within one 30 m DEM cell of the channel. That is a resolution
+artefact, so the headline numbers count only *newly* exposed assets. `in_wet_extent_max` keeps the raw count.
+Any value that could not be computed is `null`; the paths are listed in `non_finite_fields`.
 
 All geometry is GeoJSON in EPSG:4326 (lon, lat). Lengths and areas were computed in EPSG:32645 (UTM 45N, metres).
 
