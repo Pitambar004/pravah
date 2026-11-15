@@ -40,6 +40,11 @@ class Job:
     tiles_total: int | None = None
     error: str | None = None
     result: dict[str, Any] | None = None
+    # Location jobs: {"lat", "lon", "place", ...}; scene_id is filled once the scene is fetched.
+    location: dict[str, Any] | None = None
+    stage: str | None = None  # fetching | predicting (location jobs)
+    stage_detail: str | None = None
+    stage_progress: float | None = None  # 0..1 within the current stage
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -60,14 +65,16 @@ class JobQueue:
         self._thread.start()
 
     # ----------------------------------------------------------------- public
-    def submit(self, run_id: str, scene_id: str, threshold: float) -> Job:
+    def submit(self, run_id: str, scene_id: str, threshold: float,
+               location: dict[str, Any] | None = None) -> Job:
         with self._lock:
             pending = sum(j.status in ("queued", "running") for j in self._jobs.values())
             if pending >= self._max:
                 raise OverflowError(f"Queue full ({pending} pending jobs)")
             if any(j.run_id == run_id for j in self._jobs.values()) or (self._outputs / run_id).exists():
                 raise FileExistsError(f"Run {run_id} already exists")
-            job = Job(job_id=uuid.uuid4().hex[:12], run_id=run_id, scene_id=scene_id, threshold=threshold)
+            job = Job(job_id=uuid.uuid4().hex[:12], run_id=run_id, scene_id=scene_id, threshold=threshold,
+                      location=location)
             self._jobs[job.job_id] = job
         self._persist(job)
         self._q.put(job.job_id)

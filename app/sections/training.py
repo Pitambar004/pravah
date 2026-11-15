@@ -217,6 +217,6 @@ def _body() -> None:
 
 def render_training_section(ctx: AppContext) -> None:
     render_page_frame(ctx, "Training", "Training · 1 vs 2 GB10 nodes",
-                      "The same model trained on one GB10 node and on two with PyTorch DDP. Updates live.")
+                      "The same model trained on one GB10 node and on two with PyTorch DDP. Updates live.", location=False)
     live = st.toggle("Live refresh", value=True, key="pv_train_live")
     st.fragment(run_every=10 if live else None)(_body)()

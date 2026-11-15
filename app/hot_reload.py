@@ -8,9 +8,10 @@ _VERSIONS = globals().get("_VERSIONS", {})
 _MODULES = [
     "pravah.replay.scenario", "pravah.replay.lakes", "pravah.replay.cascade",
     "pravah.replay.imagery", "pravah.replay.image_pairs", "pravah.replay.live", "pravah.replay.presentation",
-    "app.api_client", "app.theme", "app.components.map_view", "app.components.notifications",
+    "app.api_client", "app.theme", "app.components.layout", "app.components.empty_state",
+    "app.components.metric_card", "app.context", "app.components.map_view", "app.components.compare_map", "app.components.notifications",
     "app.nepal_data", "app.image_data", "app.sections.operations_data", "app.sections.lakes",
-    "app.sections.nepal_monitor", "app.sections.judge_demo", "app.sections.simulate",
+    "app.sections.nepal_monitor", "app.sections.judge_demo", "app.sections.simulate", "app.sections.validation",
 ]
 
 

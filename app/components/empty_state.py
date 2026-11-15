@@ -11,7 +11,7 @@ def render_empty_state(
     description: str = "No computed outputs are present in the selected run folder.",
     action_command: str | None = None,
     expected_files: list[str] | None = None,
-    badge: str | None = "Awaiting processing",
+    badge: str | None = None,
     icon_name: str = "hourglass_empty",
     compact: bool = False,
     as_html: bool = False,
@@ -24,12 +24,16 @@ def render_empty_state(
         files = '<div class="pv-empty-files">' + "".join(
             f"<code>{escape(f)}</code>" for f in expected_files
         ) + "</div>"
+    setup = (
+        '<details class="pv-empty-setup"><summary>Setup details</summary>'
+        f'{cmd}{files}</details>' if cmd or files else ""
+    )
     markup = (
         f'<div class="pv-empty{" compact" if compact else ""}" role="status">'
         f'<div class="pv-empty-icon">{icon(icon_name, 24)}</div>'
         f"{badge_html}"
         f'<div class="pv-empty-title">{escape(title)}</div>'
-        f'<div class="pv-empty-desc">{escape(description)}</div>{cmd}{files}</div>'
+        f'<div class="pv-empty-desc">{escape(description)}</div>{setup}</div>'
     )
     if as_html:
         return markup

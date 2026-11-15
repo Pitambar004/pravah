@@ -12,6 +12,24 @@ from app.theme import TOKENS
 from pravah.configuration import configured_url
 from pravah.replay.lakes import load_lakes
 
+LAKE_CHANGE_KEY = "pv_lake_change"
+
+
+def surface_change_tile(result):
+    """(value, help) for the surface-change metric from the latest successful /lakes/change result."""
+    if not result:
+        return "Awaiting imagery", "Run a lake comparison below with two cloud-valid Nepal optical water runs."
+    note = (f"{result.get('lake_id')} · {str(result.get('pre_acquired_at_utc'))[:10]} → "
+            f"{str(result.get('post_acquired_at_utc'))[:10]} · model-derived area on commonly valid pixels; "
+            "not water level, depth or storage.")
+    change = result.get("area_change_m2_common_valid")
+    if change is None:
+        return "No common valid pixels", note
+    frac = result.get("comparable_fraction_of_search")
+    if frac is not None:
+        note += f" {frac:.0%} of the search area was comparable."
+    return f"{change / 1e6:+.4f} km²", note
+
 
 @st.cache_data(ttl=300, show_spinner=False)
 def lake_context(root, version, endpoint):
@@ -47,7 +65,8 @@ def render_lakes(ctx):
     render_map_workspace(layers, height=540, initial_bounds=[[28.1, 85.1], [28.7, 85.8]])
     cols = st.columns(4)
     cols[0].metric("Mapped lake baselines", len(doc["features"]))
-    cols[1].metric("2026 surface change", "Awaiting imagery")
+    change = st.session_state.get(LAKE_CHANGE_KEY)
+    cols[1].metric("Lake surface change", *surface_change_tile(change))
     cols[2].metric("Current water level", "Unmeasured")
     cols[3].metric("Water depth", "Unmeasured")
     st.info("Optical water masks can measure surface area and shoreline changes in cloud-valid images. Surface elevation needs altimetry or calibrated terrain/shoreline measurements; depth and storage need bathymetry. This inventory’s DSM elevations are not current water levels.")
@@ -73,4 +92,7 @@ def render_lakes(ctx):
             if error:
                 st.warning(error)
             else:
-                st.json(result)
+                st.session_state[LAKE_CHANGE_KEY] = result
+                st.rerun()
+        if change:
+            st.json(change)

@@ -33,6 +33,7 @@ def render_methodology_section(ctx: AppContext) -> None:
         "Sources & Methodology",
         "Sources & Methodology",
         "How PRAVAH produces its evidence, which sources it relies on, and where its results stop being reliable.",
+        location=False,
     )
     t_method, t_sources, t_models, t_replay, t_limits, t_prov = st.tabs(
         ["Methodology", "Data sources", "Models", "Replay rules", "Limitations", "Provenance"]

@@ -69,6 +69,12 @@ def submit_prediction(scene_id: str, threshold: float, run_id: str | None = None
     return _request("POST", "/api/v1/predictions", json=body, timeout=15.0)
 
 
+def submit_location_prediction(lat: float, lon: float, place: str | None, threshold: float = 0.5):
+    """Fetch the newest usable Sentinel-2 L1C crop around the point on the API host, then predict."""
+    body = {"lat": lat, "lon": lon, "place": place, "threshold": threshold}
+    return _request("POST", "/api/v1/locations/predictions", json=body, timeout=15.0)
+
+
 def jobs() -> tuple[dict[str, Any] | None, str | None]:
     return _request("GET", "/api/v1/predictions")
 

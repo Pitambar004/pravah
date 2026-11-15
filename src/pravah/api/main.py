@@ -14,6 +14,8 @@ Routes (all JSON):
 * ``GET  /api/v1/status``                  device, GPU, model hash, storage, queue
 * ``GET  /api/v1/scenes``                  GeoTIFFs available under the scenes dir
 * ``POST /api/v1/predictions``             queue a prediction  (token if configured)
+* ``POST /api/v1/locations/predictions``   fetch the newest usable Sentinel-2 L1C crop around a
+  point, then predict on it (token if configured; see ``pravah.catalog.s2_fetch``)
 * ``GET  /api/v1/predictions[/{job_id}]``  job status
 * ``GET  /api/v1/runs``                    finished runs in the outputs dir
 * ``GET  /api/v1/runs/{run_id}``           run metadata
@@ -42,6 +44,7 @@ from pydantic import BaseModel, Field
 from pravah import __version__
 from pravah.api.jobs import Job, JobQueue
 from pravah.api.settings import Settings
+from pravah.catalog.s2_fetch import fetch_scene
 from pravah.configuration import configured_url
 from pravah.inference.engine import CheckpointError, InferenceEngine, describe_raster
 
@@ -57,6 +60,7 @@ DOWNLOADABLE = {
 }
 
 EngineFactory = Callable[[Settings], InferenceEngine]
+SceneFetcher = Callable[..., dict[str, Any]]
 SCENE_SIDECAR_KEYS = ("scene_id", "product_id", "acquired_at_utc", "available_at_utc", "availability_basis",
                       "sensor", "processing_level")
 EXPOSURE_SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "exposure.py"
@@ -107,6 +111,42 @@ class PredictionRequest(BaseModel):
     scene_id: str = Field(..., description="Path of the GeoTIFF relative to the scenes directory")
     threshold: float = Field(0.5, ge=0.0, le=1.0)
     run_id: str | None = Field(None, description="Optional; letters, digits, '_' and '-' only")
+
+
+class LocationPredictionRequest(BaseModel):
+    lat: float = Field(..., ge=-90, le=90)
+    lon: float = Field(..., ge=-180, le=180)
+    place: str | None = Field(None, max_length=300, description="Display name, recorded in metadata only")
+    half_size_km: float = Field(5.0, ge=1.0, le=10.0, description="Half the side of the square box")
+    lookback_days: int = Field(60, ge=1, le=365)
+    max_cloud_percent: float = Field(30.0, ge=0.0, le=100.0, description="Tile-wide eo:cloud_cover limit")
+    threshold: float = Field(0.5, ge=0.0, le=1.0)
+
+
+def location_run_id(req: LocationPredictionRequest, stamp: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", (req.place or "").split(",")[0]).strip("_")[:40]
+    if not slug:
+        slug = f"{req.lat:.3f}_{req.lon:.3f}".replace("-", "m").replace(".", "p")
+    return f"loc_{slug}_{stamp}"
+
+
+def _stage(job: Job, message: str, fraction: float) -> None:
+    job.stage_detail, job.stage_progress = message, max(0.0, min(1.0, float(fraction)))
+
+
+def location_case_study(location: dict[str, Any], acquired_at_utc: str | None) -> dict[str, Any]:
+    """Dashboard labels for a searched-place run (never the Rasuwa event or a benchmark)."""
+    name = (location.get("place") or "").strip()
+    when = (acquired_at_utc or "")[:10]
+    try:
+        d = datetime.fromisoformat(when) if when else None
+        date = f"{d.day} {d:%b %Y}" if d else "unknown date"
+    except ValueError:
+        date = when
+    return {"id": "live-location", "scope": "live_location",
+            "region": name.split(",")[0] if name else f"{location['lat']:.4f}, {location['lon']:.4f}",
+            "corridor": f"{2 * location['half_size_km']:g} km box at {location['lat']:.4f}, {location['lon']:.4f}",
+            "place": name or None, "lat": location["lat"], "lon": location["lon"], "event_date": date}
 
 
 class ServiceState:
@@ -168,20 +208,32 @@ class StripPrefix:
         await self.app(scope, receive, send)
 
 
-def create_app(settings: Settings | None = None, engine_factory: EngineFactory | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, engine_factory: EngineFactory | None = None,
+               scene_fetcher: SceneFetcher | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     state = ServiceState(settings, engine_factory or _default_engine_factory)
+    fetcher = scene_fetcher or fetch_scene
 
     def run_job(job: Job, progress: Callable[[int, int], None]) -> dict[str, Any]:
         with state.lock:
             engine = state.engine
         if engine is None:
             raise RuntimeError(f"Model not loaded: {state.load_error}")
+        if job.location and not job.scene_id:
+            loc = job.location
+            job.stage = "fetching"
+            fetched = fetcher(loc["lat"], loc["lon"], settings.scenes_dir, place=loc.get("place"),
+                              half_km=loc["half_size_km"], lookback_days=loc["lookback_days"],
+                              max_cloud=loc["max_cloud_percent"], units=settings.input_units,
+                              progress=lambda msg, frac: _stage(job, msg, frac))
+            job.scene_id, job.stage, job.stage_progress = fetched["scene_id"], "predicting", 0.0
         scene = _safe_scene(settings, job.scene_id)
+        extra = {"scene_id": job.scene_id, "job_id": job.job_id, **scene_sidecar(scene)}
+        if job.location:
+            extra["case_study"] = location_case_study(job.location, extra.get("acquired_at_utc"))
         result = engine.predict(
             scene, settings.outputs_dir / job.run_id, run_id=job.run_id, threshold=job.threshold,
-            progress=progress, extra_metadata={"scene_id": job.scene_id, "job_id": job.job_id,
-                                               **scene_sidecar(scene)},
+            progress=progress, extra_metadata=extra,
             input_units=settings.input_units,
         )
         exposure = run_exposure(settings, settings.outputs_dir / job.run_id)
@@ -281,6 +333,32 @@ def create_app(settings: Settings | None = None, engine_factory: EngineFactory |
         _run_dir(settings, run_id)
         try:
             job = jobs().submit(run_id, req.scene_id, req.threshold)
+        except OverflowError as exc:
+            raise HTTPException(429, str(exc)) from exc
+        except FileExistsError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return job.to_dict()
+
+    @app.post("/api/v1/locations/predictions", status_code=202, dependencies=[Depends(require_token)])
+    def create_location_prediction(req: LocationPredictionRequest) -> dict[str, Any]:
+        with state.lock:
+            loaded = state.engine is not None
+        if not loaded:
+            raise HTTPException(503, f"Model not loaded: {state.load_error}")
+        try:
+            settings.scenes_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise HTTPException(503, f"Scenes directory not writable: {exc}") from exc
+        for j in jobs().list():  # same point already queued/running → return that job, don't download twice
+            if (j.status in ("queued", "running") and j.location
+                    and round(j.location["lat"], 4) == round(req.lat, 4)
+                    and round(j.location["lon"], 4) == round(req.lon, 4)):
+                return j.to_dict()
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        run_id = location_run_id(req, stamp)
+        _run_dir(settings, run_id)
+        try:
+            job = jobs().submit(run_id, "", req.threshold, location=req.model_dump())
         except OverflowError as exc:
             raise HTTPException(429, str(exc)) from exc
         except FileExistsError as exc:

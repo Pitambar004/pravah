@@ -67,7 +67,7 @@ def _chart(s: dict[str, Any], today: str) -> alt.LayerChart:
 
 def render_outlook_section(ctx: AppContext) -> None:
     render_page_frame(ctx, "River Outlook", "River Outlook",
-                      "Observed DHM river levels beside GloFAS 7-day discharge and rainfall forecasts.")
+                      "Observed DHM river levels beside GloFAS 7-day discharge and rainfall forecasts.", location=False)
     render_callout(
         "These are <b>third-party model forecasts</b> (Copernicus GloFAS via Open-Meteo), shown next to DHM "
         "observations. PRAVAH does not yet have a validated forecast model. GloFAS covers rainfall- and "

@@ -46,6 +46,35 @@ The values above are only an example of the format. Record the real values for e
 
 ## 2. Score it
 
+### Available retrospective baseline
+
+`scripts/export_persistence_prediction.py` exports an explicit **persistence baseline**:
+carry an audited pre-event water map forward unchanged. It predicts no new water.
+It verifies acquisition and recorded publication times against the cutoff, raster
+checksums, class semantics and CRS, and refuses synthetic sources or existing output folders.
+It accepts no post-event inputs. The actual export time is retained as `issued_at_utc`;
+this is a retrospective reconstruction, not a historically issued warning. Source-image
+eligibility does not establish historical availability of the derived model output.
+
+```bash
+python scripts/export_persistence_prediction.py \
+  --pre-run outputs/p3_prithvi_nepal_20260811_T45RUL \
+  --output outputs/pred_persistence_20260811_T45RUL \
+  --cutoff 2026-08-25T23:59:59Z
+python scripts/validate_prediction.py \
+  --prediction outputs/pred_persistence_20260811_T45RUL \
+  --reference outputs/p3_prithvi_nepal_20260827_T45RUL \
+  --baseline outputs/p3_prithvi_nepal_20260811_T45RUL --target new_water
+```
+
+The example omits event onset rather than inventing it; no lead time is reported.
+Evaluate each tile separately to avoid silently pooling overlapping coverage or
+different observation dates. The dashboard labels these runs as retrospective
+persistence baselines. Their scores are a comparison floor, not trained forecast skill.
+The provisional source AOI has no established independent pre-event provenance.
+
+### External forecast model
+
 ```bash
 python scripts/validate_prediction.py \
   --prediction outputs/pred_rasuwa_v1 \

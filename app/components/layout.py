@@ -133,6 +133,6 @@ def status_list(rows: Iterable[tuple[str, str | None, str, str]]) -> str:
 
 def render_footer() -> None:
     html(
-        '<div class="pv-footer"><div>PRAVAH · Team 12 · CIQ Local AI Hackathon 2026</div>'
-        "<div>Retrospective evidence prototype — not an operational warning system</div></div>"
+        '<div class="pv-footer"><div>PRAVAH <span>· Team 12</span></div>'
+        "<div>Research prototype · not an operational warning system</div></div>"
     )

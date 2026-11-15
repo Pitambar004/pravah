@@ -45,6 +45,7 @@ def render_compute_section(ctx: AppContext) -> None:
         "Compute & Performance",
         "Compute environment, processing runs and multi-node inference benchmarks. "
         "Only measured values from benchmark artifacts are shown.",
+        location=False,
     )
     a: RunArtifacts = ctx.artifacts
     bench = a.benchmark or {}

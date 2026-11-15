@@ -275,3 +275,58 @@ def test_dashboard_loads_run_over_http_from_api(tmp_path, ckpt, monkeypatch):
     assert a.observed_metadata["runtime"]["device"] == "cpu"
     assert a.water_geojson["type"] == "FeatureCollection"
     assert all(h.get("FB-Authorization") == "Bearer fb-test-token" for h in seen_headers)
+
+
+def test_api_location_prediction_fetches_then_predicts(tmp_path, ckpt):
+    """Fake fetcher (synthetic raster, no network) stands in for pravah.catalog.s2_fetch.fetch_scene."""
+    s = _settings(tmp_path, ckpt)
+    calls = []
+
+    def fake_fetch(lat, lon, scenes_dir, *, place, half_km, lookback_days, max_cloud, units, progress):
+        calls.append({"lat": lat, "lon": lon, "place": place, "half_km": half_km, "units": units})
+        progress("Downloading synthetic bands", 0.5)
+        (scenes_dir / "auto").mkdir(exist_ok=True)
+        write_raster(scenes_dir / "auto/synthetic_crop.tif", width=96, height=96)
+        side = {"scene_id": "auto/synthetic_crop.tif", "product_id": "SYNTHETIC_NOT_A_PRODUCT",
+                "acquired_at_utc": "2026-11-12T05:02:21Z", "sensor": "S2", "processing_level": "L1C"}
+        (scenes_dir / "auto/synthetic_crop.json").write_text(json.dumps(side))
+        return side
+
+    with TestClient(create_app(s, scene_fetcher=fake_fetch)) as c:
+        bad = c.post("/api/v1/locations/predictions", json={"lat": 95, "lon": 84})
+        assert bad.status_code == 422
+        r = c.post("/api/v1/locations/predictions", json={"lat": 27.9828, "lon": 84.2656, "place": "Synthetic Town, Nowhere"})
+        assert r.status_code == 202, r.text
+        job = r.json()
+        assert job["run_id"].startswith("loc_Synthetic_Town_") and job["scene_id"] == ""
+        for _ in range(400):
+            j = c.get(f"/api/v1/predictions/{job['job_id']}").json()
+            if j["status"] in ("succeeded", "failed"):
+                break
+            time.sleep(0.05)
+        assert j["status"] == "succeeded", j
+        assert j["scene_id"] == "auto/synthetic_crop.tif" and j["stage"] == "predicting"
+        assert j["stage_detail"] == "Downloading synthetic bands"
+        md = c.get(f"/api/v1/runs/{job['run_id']}").json()
+        assert md["scene_id"] == "auto/synthetic_crop.tif" and md["product_id"] == "SYNTHETIC_NOT_A_PRODUCT"
+        assert md["case_study"]["scope"] == "live_location" and md["case_study"]["region"] == "Synthetic Town"
+        assert md["case_study"]["event_date"] == "12 Nov 2026"
+    assert calls == [{"lat": 27.9828, "lon": 84.2656, "place": "Synthetic Town, Nowhere", "half_km": 5.0, "units": "dn"}]
+
+
+def test_api_location_prediction_reports_fetch_failure(tmp_path, ckpt):
+    s = _settings(tmp_path, ckpt)
+
+    def no_scene(*_a, **_k):
+        from pravah.catalog.s2_fetch import FetchError
+        raise FetchError("No Sentinel-2 L1C scene in the last 60 days")
+
+    with TestClient(create_app(s, scene_fetcher=no_scene)) as c:
+        job = c.post("/api/v1/locations/predictions", json={"lat": 10, "lon": 10}).json()
+        assert job["run_id"].startswith("loc_10p000_10p000_")
+        for _ in range(200):
+            j = c.get(f"/api/v1/predictions/{job['job_id']}").json()
+            if j["status"] in ("succeeded", "failed"):
+                break
+            time.sleep(0.05)
+        assert j["status"] == "failed" and "No Sentinel-2 L1C scene" in j["error"]
