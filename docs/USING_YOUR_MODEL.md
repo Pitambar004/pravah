@@ -10,6 +10,18 @@ Copy each scene's GeoTIFF into `data/raw/sentinel2/`. For Rasuwa, copy the prepa
 volume at `/data/outputs/p3_audit_20261114T214402Z/s2_prepared_full/<scene>/s2_l1c_reflectance.tif`. Give each
 copy a readable name such as `rasuwa_20260827_T45RUL.tif`.
 
+Without Fuzzball access, rebuild the same input locally. Download the six L1C bands (`B02 B03 B04 B8A B11 B12`),
+`MTD_MSIL1C.xml` and `QI_DATA/MSK_CLASSI_B00.jp2` of the scene into one folder (for example from the public
+Sentinel-2 mirror on Google Cloud Storage), then run:
+
+```bash
+python scripts/prepare_s2_reflectance.py --safe-dir data/raw/sentinel2/<PRODUCT> \
+  --reference outputs/p3_prithvi_nepal_20260827_T45RUL --output data/raw/sentinel2/rasuwa_20260827_T45RUL.tif
+```
+
+It refuses unless every band's SHA-256 matches the Prithvi run's `expected_band_sha256`, and it applies the same
+scaling, grid and cloud/cirrus/snow mask that run recorded.
+
 Next to each image, copy the matching Prithvi run's `observed_metadata.json` under the same name, for example
 `cp outputs/p3_prithvi_nepal_20260827_T45RUL/observed_metadata.json data/raw/sentinel2/rasuwa_20260827_T45RUL.json`.
 This gives your run its satellite date, so the dashboard can place it before or after the event. Without it the
