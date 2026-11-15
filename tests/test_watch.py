@@ -407,3 +407,16 @@ def test_build_history_step_merges_sources(tmp_path, monkeypatch):
     r = build.step_history(tmp_path / "out", SimpleNamespace())
     t = json.loads((tmp_path / "out/history/table.json").read_text())
     assert r["days"] == 2 and t["precip"][0] == [1, 0] and t["discharge"] == [[5.0], [None]]
+
+
+def test_api_replaces_non_finite_numbers_with_null(tmp_path):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from pravah.watch.server import attach_watch_routes
+    app = FastAPI()
+    engine = attach_watch_routes(app, tmp_path, token=None, start_engine=False)
+    engine.state = {"assessment": {"level": "ok", "x": float("inf")}, "downstream": {"r": [1.0, float("nan"), np.float32(2.5)]}}
+    body = TestClient(app).get("/api/v1/watch/state").json()
+    assert body["assessment"]["x"] is None and body["downstream"]["r"] == [1.0, None, 2.5]
+    assert body["non_finite_fields"] == [".assessment.x", ".downstream.r[1]"]

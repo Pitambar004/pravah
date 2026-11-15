@@ -20,6 +20,34 @@ from fastapi import Depends, Header, HTTPException, Query
 from pravah.watch.config import watch_root
 
 
+def finite(obj, path="", bad=None):
+    """Replace NaN/±inf (not JSON-compliant) with None = unknown; record where they occurred."""
+    import math
+
+    import numpy as np
+    if isinstance(obj, dict):
+        return {k: finite(v, f"{path}.{k}", bad) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [finite(v, f"{path}[{i}]", bad) for i, v in enumerate(obj)]
+    if isinstance(obj, (float, np.floating)):
+        if not math.isfinite(obj):
+            if bad is not None and len(bad) < 50:
+                bad.append(path)
+            return None
+        return float(obj)
+    if isinstance(obj, np.integer):
+        return int(obj)
+    return obj
+
+
+def _clean(doc):
+    bad: list = []
+    out = finite(doc, "", bad)
+    if bad and isinstance(out, dict):
+        out["non_finite_fields"] = bad
+    return out
+
+
 def _load_components(root: Path):
     comp = {"river": None, "emulator": None, "observer": None, "errors": {}}
     try:
@@ -81,7 +109,7 @@ def attach_watch_routes(app, root: Path, token: str | None, start_engine: bool =
         s = engine.public_state()
         if not s:
             raise HTTPException(503, "First live tick not finished yet")
-        return s
+        return _clean(s)
 
     @app.get("/api/v1/watch/status")
     def status():
@@ -119,6 +147,7 @@ def attach_watch_routes(app, root: Path, token: str | None, start_engine: bool =
             if name == "width_fits" and doc:
                 doc = {"years": doc["years"], "reaches": doc["reaches"]}
             out[name] = doc
+        out = _clean(out)
         out["build_steps"] = {p.stem.replace(".done", ""): json.loads(p.read_text()) for p in sorted((root / "steps").glob("*.done.json"))} \
             if (root / "steps").exists() else {}
         return out
@@ -146,7 +175,7 @@ def attach_watch_routes(app, root: Path, token: str | None, start_engine: bool =
             raise HTTPException(503, f"Replay {replay['status']}")
         if not 0 <= index < d["frame_count"]:
             raise HTTPException(404, "Frame out of range")
-        return d["frames"][index]
+        return _clean(d["frames"][index])
 
     app.state.watch_engine = engine
     return engine
