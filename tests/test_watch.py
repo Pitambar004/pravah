@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from datetime import date, datetime, timedelta, timezone
 
 import numpy as np
@@ -11,6 +12,9 @@ import pytest
 from pravah.watch import assess, glacier, hydro, optical, sar
 
 pytest.importorskip("torch")
+# Tests that run even a 1-epoch synthetic training loop are opt-in: real training runs only on GB10.
+needs_training = pytest.mark.skipif(os.environ.get("PRAVAH_RUN_TRAINING_TESTS") != "1",
+                                    reason="training-shaped test; set PRAVAH_RUN_TRAINING_TESTS=1 (GB10/CI)")
 
 
 # ------------------------------------------------------------------------------ glacier
@@ -158,6 +162,7 @@ def test_future_quake_is_ignored():
 
 
 # ------------------------------------------------------------------------------ emulator
+@needs_training
 def test_emulator_trains_on_synthetic_series(tmp_path):
     from pravah.watch.emulator import Emulator, train
     rng = np.random.default_rng(1)
@@ -248,6 +253,7 @@ def _synthetic_emulator(tmp_path, stations=("UP", "DN")):
     return days, P
 
 
+@needs_training
 def test_replay_never_sees_future_imagery_and_triggers_glof(tmp_path, monkeypatch):
     from pravah.watch import river as river_mod
     from pravah.watch.emulator import Emulator

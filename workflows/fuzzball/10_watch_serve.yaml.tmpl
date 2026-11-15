@@ -1,7 +1,7 @@
 # PRAVAH Live Watch 24/7 — GPU API + dashboard, both published as Fuzzball endpoints.
 #
 #   anyone on the network --HTTPS--> endpoint "dashboard" --> dashboard service (Streamlit)
-#                         --HTTPS--> endpoint "watch-api" --> api service (1× GB10: live engine thread,
+#                         --HTTPS--> endpoint "api"       --> api service (1× GB10: live engine thread,
 #                                                              GRU emulator, Manning hydraulics, replay)
 #   dashboard --http://api.service:8000 (in-workflow)--> api
 #
@@ -51,7 +51,7 @@ services:
           port: 8000
           protocol: tcp
       endpoints:
-        - name: watch-api
+        - name: api
           port-name: http
           protocol: http
           type: path

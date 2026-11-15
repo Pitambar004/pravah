@@ -52,16 +52,22 @@ def attach_watch_routes(app, root: Path, token: str | None, start_engine: bool =
             raise HTTPException(401, "Missing or invalid X-Pravah-Token")
 
     def build_replay():
-        if comp["river"] is None or not (root / "replay/pack.json").exists():
-            replay.update(status="unavailable", error="River model or replay pack missing (run the GB10 build)")
-            return
+        """Wait for the GB10 build to publish the replay pack, then compute frames once on the GPU."""
         from pravah.watch.replay import load_or_build
-        replay["status"] = "building"
+        while not (root / "replay/pack.json").exists() or comp["river"] is None:
+            replay.update(status="waiting_for_build", error="Replay pack not built yet; checking every 60 s")
+            if comp["river"] is None and (root / "river_model/river_model.json").exists():
+                fresh = _load_components(root)
+                for k in ("river", "emulator", "observer"):
+                    comp[k] = comp[k] or fresh[k]
+                engine.river, engine.emulator, engine.observer = comp["river"], comp["emulator"], comp["observer"]
+            time.sleep(60)
+        replay.update(status="building", error=None)
         try:
             replay["data"] = load_or_build(root, comp["river"], comp["emulator"],
                                            progress=lambda d, t: replay.update(done=d, total=t))
             replay["status"] = "ready"
-        except Exception as exc:  # noqa: BLE001 — a 24/7 service must outlive any provider failure
+        except Exception as exc:  # noqa: BLE001 — reported through /api/v1/watch/status
             replay.update(status="error", error=f"{type(exc).__name__}: {exc}")
 
     # The inference app owns a lifespan handler, so background work starts here (one uvicorn worker).

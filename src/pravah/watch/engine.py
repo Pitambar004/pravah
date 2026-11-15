@@ -166,7 +166,19 @@ class WatchEngine:
                 self.errors[key] = f"{type(exc).__name__}: {exc}"[:300]
 
     # ---------------------------------------------------------------------------- tick
+    def reload_artifacts(self):
+        """Build outputs can land after the service starts (satellite step runs ~30 min)."""
+        if not self.baselines:
+            self.baselines = self._json(self.root / "baselines/lakes.json") or {}
+        if not self.glacier_base:
+            self.glacier_base = self._json(self.root / "baselines/glacier.json") or {}
+        if self.river is not None and not self.river.fits:
+            fits = self._json(self.root / "river_model/width_fits.json")
+            if fits:
+                self.river.fits = fits.get("reaches", {})
+
     def tick(self, force: bool = False) -> dict:
+        self.reload_artifacts()
         now = utcnow()
         mono = time.monotonic()
         t0 = time.perf_counter()
