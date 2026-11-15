@@ -15,6 +15,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import rasterio
 from pravah.catalog.downloads import download_file
+from pravah.configuration import configured_url
 
 
 def safe_filename(filename: str) -> str:
@@ -26,7 +27,7 @@ def safe_filename(filename: str) -> str:
 def canonical_uri(url: str) -> str:
     """Do not copy ephemeral signed query-string tokens into published audit output."""
     u = urlsplit(url)
-    if u.scheme not in ("https", "http") or not u.netloc:
+    if u.scheme not in ("https", configured_url("PRAVAH_LOCAL_SCHEME")) or not u.netloc:
         raise ValueError("Source must be http(s) URL")
     return urlunsplit((u.scheme, u.netloc, u.path, "", ""))
 

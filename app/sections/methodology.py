@@ -7,22 +7,23 @@ import streamlit as st
 
 from app.components.layout import card, html, kv_list, render_badge
 from app.context import AppContext, render_page_frame
+from pravah.configuration import configured_url
 
 SOURCES = [
     {"Source": "Sentinel-2 MSI Level-1C", "Role": "Optical model input (6 bands)", "Evidence type": "Observed",
      "Provider": "Copernicus Data Space Ecosystem",
-     "Link": "https://documentation.dataspace.copernicus.eu/APIs/STAC.html"},
+     "Link": configured_url("PRAVAH_CDSE_DOCS_URL")},
     {"Source": "Sen1Floods11 hand-labelled subset", "Role": "Baseline training / validation labels", "Evidence type": "Reference labels",
-     "Provider": "Cloud to Street et al.", "Link": "https://github.com/cloudtostreet/Sen1Floods11"},
+     "Provider": "Cloud to Street et al.", "Link": configured_url("PRAVAH_SEN1FLOODS_URL")},
     {"Source": "Prithvi-EO-2.0-300M-TL-Sen1Floods11", "Role": "Pretrained water segmentation", "Evidence type": "Model",
-     "Provider": "IBM / NASA", "Link": "https://huggingface.co/ibm-nasa-geospatial/Prithvi-EO-2.0-300M-TL-Sen1Floods11"},
+     "Provider": "IBM / NASA", "Link": configured_url("PRAVAH_PRITHVI_MODEL_URL")},
     {"Source": "OpenStreetMap extract", "Role": "Buildings, roads, bridges for exposure", "Evidence type": "Context",
-     "Provider": "OpenStreetMap contributors", "Link": "https://www.openstreetmap.org/copyright"},
+     "Provider": "OpenStreetMap contributors", "Link": configured_url("PRAVAH_OSM_ATTRIBUTION_URL")},
     {"Source": "UNOSAT mudflow / rockflow extent", "Role": "Retrospective comparison only", "Evidence type": "Retrospective reference",
      "Provider": "UNITAR-UNOSAT / UNESCO IHP-WINS",
-     "Link": "https://ihp-wins.unesco.org/en/dataset/nepal-satellite-detected-mudflow-and-rockflow-extent-nepal"},
+     "Link": configured_url("PRAVAH_UNOSAT_DATA_URL")},
     {"Source": "WorldPop population grid", "Role": "Optional modelled resident population", "Evidence type": "Context (modelled)",
-     "Provider": "WorldPop", "Link": "https://www.worldpop.org/"},
+     "Provider": "WorldPop", "Link": configured_url("PRAVAH_WORLDPOP_URL")},
 ]
 
 

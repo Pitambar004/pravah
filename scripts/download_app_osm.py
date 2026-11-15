@@ -10,9 +10,10 @@ from pathlib import Path
 import httpx
 import osm2geojson
 from shapely.geometry import shape
+from pravah.configuration import configured_url
 
 ROOT = Path(__file__).resolve().parents[1]
-ENDPOINT = "https://overpass-api.de/api/interpreter"
+ENDPOINT = configured_url("PRAVAH_OVERPASS_URL")
 
 
 def save(path, data):
@@ -111,7 +112,7 @@ def main():
             "raw_sha256": hashlib.sha256(raw.read_bytes()).hexdigest(),
             "layers": files,
             "license": "OpenStreetMap contributors, ODbL 1.0",
-            "source_url": "https://www.openstreetmap.org/copyright",
+            "source_url": configured_url("PRAVAH_OSM_ATTRIBUTION_URL"),
             "scope": "Current mapped infrastructure over historical benchmark imagery; not historical event exposure or damage",
             "strict_replay_eligible": False,
         }

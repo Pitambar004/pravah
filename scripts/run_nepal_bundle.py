@@ -55,6 +55,11 @@ def configure(bundle, device):
         "PRAVAH_CHECKPOINT": config["checkpoint"],
         "PRAVAH_OUTPUTS_DIR": str(bundle / "runs"),
         "PRAVAH_REPLAY_ROOT": str(bundle / "evidence"),
+        "PRAVAH_NEPAL_GEOGRAPHY": str(project / "data/processed/nepal_monitor"),
+        "PRAVAH_LAKE_ROOT": str(project / "data/processed/nepal_lakes"),
+        "PRAVAH_NATIONAL_ROOT": str(project / "data/processed/nepal_national"),
+        "PRAVAH_IMAGERY_ROOT": str(project / "data/processed/nepal_imagery"),
+        "PRAVAH_LIVE_ROOT": str(bundle / "live_cache"),
         "PRAVAH_REPLAY_MANIFEST": config["replay_manifest"],
         "PRAVAH_CONTEXT_DIR": str(project / "data/processed/live_app/context"),
         "PRAVAH_DEVICE": device,
@@ -90,7 +95,13 @@ def main(argv=None):
             )
             return 0
         env = {**os.environ, **configure(bundle, args.device)}
-        env.setdefault("PRAVAH_API_URL", "http://api.service:8000")
+        # The standalone verify path above needs only the standard library.
+        # Application configuration is loaded only when starting a service.
+        sys.path.insert(0, str(bundle / "project/src"))
+        from pravah.configuration import configured_url
+
+        env.setdefault("PRAVAH_API_URL", configured_url("PRAVAH_INTERNAL_API_URL"))
+        env.setdefault("PRAVAH_NEPAL_API_URL", env["PRAVAH_API_URL"])
         if args.service == "api":
             command = [
                 sys.executable,

@@ -10,6 +10,7 @@ from pathlib import Path
 
 import numpy as np
 import rasterio
+from pravah.configuration import configured_url
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -91,7 +92,7 @@ def prepare():
             "acquisition_precision": "day, from provider event metadata",
             "verified_available_at_utc": None,
             "analysis_mode": "retrospective benchmark",
-            "source_url": "https://github.com/cloudtostreet/Sen1Floods11",
+            "source_url": configured_url("PRAVAH_SEN1FLOODS_URL"),
             "selection_record": selection,
         }
     save(target / "scene_catalog.json", catalog)

@@ -19,12 +19,13 @@ from pathlib import Path
 import httpx
 
 from pravah.replay.experiment import audit, freeze, register_evaluation, sha256
+from pravah.configuration import configured_url
 
 PROJECT = Path(__file__).resolve().parents[1]
 DEFAULT_ROOT = PROJECT / "outputs/nepal_replay/prepared"
 EVENT_ID = "rasuwa-2026-08-26"
 DEFAULT_CUTOFF = "2026-08-26T08:30:00+05:45"
-REPORT = "https://hydrology.gov.np/cm/files/Bhotekoshi-Trishuli-Narayani_Flood_Report_CHWRR_1%20_1787809133090.pdf"
+REPORT = configured_url("PRAVAH_DHM_EVENT_REPORT_URL")
 SOURCES = [
     (
         "usgs_us7000tbwb",
@@ -35,7 +36,7 @@ SOURCES = [
     ("dhm_2026_technical_report", REPORT, "pdf", "evaluation_reference"),
     (
         "ndrrma_2025_event",
-        "https://ndrrma.gov.np/mediafiles/publications/Rasuwagadhi_Flood_Sitrep1_08072025_.pdf",
+        configured_url("PRAVAH_NDRRMA_2025_REPORT_URL"),
         "pdf",
         "context_only",
     ),
@@ -114,7 +115,7 @@ def stage_context(root: Path) -> list[dict]:
                     root,
                     target,
                     "rasuwa_copernicus_dsm",
-                    "https://copernicus-dem-30m.s3.amazonaws.com/readme.html",
+                    configured_url("PRAVAH_DEM_README_URL"),
                     "context_only",
                     crs=item["crs"],
                     bounds=item["bounds"],
@@ -199,7 +200,7 @@ def collect(root: Path) -> tuple[list[dict], list[dict]]:
         ]:
             identity = "august_era5_" + name
             try:
-                url = "https://archive-api.open-meteo.com/v1/archive"
+                url = configured_url("PRAVAH_OPEN_METEO_ARCHIVE_URL")
                 params = {
                     "latitude": latitude,
                     "longitude": longitude,
@@ -253,7 +254,7 @@ def collect(root: Path) -> tuple[list[dict], list[dict]]:
             series = re.search(r'name="seriesid"[^>]*value="([0-9]+)"', page.text)
             if not csrf or not series:
                 raise ValueError("Public station form changed")
-            endpoint = "https://dhm.gov.np/site/getRiverWatchBySeriesId_Single"
+            endpoint = configured_url("PRAVAH_DHM_HISTORY_URL")
             response = client.post(
                 endpoint,
                 data={
@@ -306,7 +307,7 @@ def collect(root: Path) -> tuple[list[dict], list[dict]]:
                 }
             )
         try:
-            endpoint = "https://stac.dataspace.copernicus.eu/v1"
+            endpoint = configured_url("PRAVAH_CDSE_STAC_URL")
             collection = json.loads(
                 get_bytes(client, endpoint + "/collections/sentinel-2-l1c")
             )
@@ -399,7 +400,7 @@ def prepare(root: Path, download: bool) -> dict:
         "event_id": EVENT_ID,
         "assets": assets,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
-        "event_source": "https://www.who.int/nepal/emergencies/2026-rasuwa-flash-floods",
+        "event_source": configured_url("PRAVAH_WHO_EVENT_URL"),
         "forecast_model": None,
         "blockers": [
             "No time-eligible Nepal input manifest or historical availability receipts",

@@ -14,11 +14,11 @@ from typing import Any
 
 import httpx
 
-DEFAULT_URL = "http://localhost:8000"
+from pravah.configuration import configured_url
 
 
 def api_url() -> str:
-    return os.environ.get("PRAVAH_API_URL", DEFAULT_URL).rstrip("/")
+    return configured_url("PRAVAH_API_URL").rstrip("/")
 
 
 def _headers() -> dict[str, str]:
@@ -36,11 +36,12 @@ def _headers() -> dict[str, str]:
 
 
 def _request(method: str, path: str, *, json: dict[str, Any] | None = None,
-             timeout: float = 5.0) -> tuple[Any | None, str | None]:
+             timeout: float = 5.0, base_url: str | None = None) -> tuple[Any | None, str | None]:
+    endpoint = (base_url or api_url()).rstrip("/")
     try:
-        r = httpx.request(method, f"{api_url()}{path}", json=json, headers=_headers(), timeout=timeout)
+        r = httpx.request(method, f"{endpoint}{path}", json=json, headers=_headers(), timeout=timeout)
     except httpx.HTTPError as exc:
-        return None, f"API unreachable at {api_url()} ({type(exc).__name__})"
+        return None, f"API unreachable at {endpoint} ({type(exc).__name__})"
     if r.status_code >= 400:
         try:
             detail = r.json().get("detail", r.text)

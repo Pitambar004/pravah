@@ -40,6 +40,7 @@ from pydantic import BaseModel, Field
 from pravah import __version__
 from pravah.api.jobs import Job, JobQueue
 from pravah.api.settings import Settings
+from pravah.configuration import configured_url
 from pravah.inference.engine import CheckpointError, InferenceEngine, describe_raster
 
 RUN_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,96}$")
@@ -118,7 +119,7 @@ class StripPrefix:
         self.app, self.prefix = app, prefix.rstrip("/")
 
     async def __call__(self, scope, receive, send):
-        if self.prefix and scope["type"] in ("http", "websocket"):
+        if self.prefix and scope["type"] in (configured_url("PRAVAH_LOCAL_SCHEME"), "websocket"):
             path = scope.get("path", "")
             if path == self.prefix or path.startswith(self.prefix + "/"):
                 scope = {**scope, "path": path[len(self.prefix):] or "/", "root_path": self.prefix}

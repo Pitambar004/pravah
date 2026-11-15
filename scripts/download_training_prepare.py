@@ -21,6 +21,7 @@ import numpy as np
 import rasterio
 from rasterio.warp import transform_bounds
 from rasterio.windows import Window, bounds, transform
+from pravah.configuration import configured_url
 
 S2_BANDS = ("B2", "B3", "B4", "B8A", "B11", "B12")
 S2_INDEXES = (2, 3, 4, 9, 12, 13)  # rasterio is one-based
@@ -627,7 +628,7 @@ def main():
         "worldfloods_source_order": "13 Sentinel-2 bands followed by QA60 and cloud probability in 15-band exports; only B2,B3,B4,B8A,B11,B12 selected",
         "worldfloods_processing_level_verification": {
             "level": "L1C",
-            "source": "https://www.nature.com/articles/s41598-023-47595-7",
+            "source": configured_url("PRAVAH_DATASET_PAPER_URL"),
             "note": "Verified after the immutable download plan was created",
         },
         "grid_policy": "Identical CRS/dimensions; at most 1e-6 image-pixel displacement at all four corners for provider numeric rounding; no resampling",

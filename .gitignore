@@ -7,6 +7,8 @@ __pycache__/
 .env
 .env.*
 !.env.example
+.envrc
+.direnv/
 *.py[cod]
 *.log
 *.pt
@@ -46,19 +48,32 @@ build/
 
 # Local secrets and tokens (Streamlit secrets, Fuzzball endpoint tokens, CDSE credentials)
 .streamlit/secrets.toml
+**/.streamlit/secrets.toml
+**/.streamlit/secrets.*.toml
 *.token
 .netrc
 .s3cfg
+*.p12
+*.pfx
 
 # Local exports and tool credentials; keep scripts/fuzzball and workflows tracked
 /local_results/
 /.aws/
 /.fuzzball/
 /.cache/
+/.codex/sessions/
+/.codex/history.jsonl
+/snapshots/
+/checkpoints/
+/previews/
 
 # Private download plans/audits can contain signed provider URLs
 data/manifests/*private*.json
 data/manifests/*private*.jsonl
+*_private.json
+*_private.jsonl
+*.private.json
+*.private.jsonl
 
 # Additional raw archive formats
 *.tar
@@ -66,3 +81,13 @@ data/manifests/*private*.jsonl
 *.tar.bz2
 *.tar.xz
 *.7z
+*.npy
+
+# Local coverage, type-checker and property-test caches
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.mypy_cache/
+.pytype/
+.hypothesis/

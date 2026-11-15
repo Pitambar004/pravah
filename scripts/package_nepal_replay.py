@@ -51,25 +51,25 @@ def build(evidence, output, training=False):
                 continue
             if source.is_symlink():
                 raise ValueError("Source symlinks must be reviewed before packaging")
-            if not source.is_file() or source.suffix not in [
-                ".py",
-                ".toml",
-                ".css",
-                ".sh",
-            ]:
+            if not source.is_file() or (
+                source.suffix not in [".py", ".toml", ".css", ".sh"]
+                and source.name not in ["Dockerfile", "requirements-service.txt"]
+            ):
                 continue
             if "__pycache__" in source.parts:
                 continue
             target = project / source.relative_to(PROJECT)
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
-    for name in ["pyproject.toml", "README.md", "AGENTS.md"]:
+    for name in ["pyproject.toml", "README.md", "AGENTS.md", ".env.example"]:
         shutil.copy2(PROJECT / name, project / name)
     for name in [
         "NEPAL_REPLAY_HANDOFF.md",
         "FUZZBALL_MORNING.md",
         "LOCAL_DEMO_HANDOFF.md",
         "USER_DATASETS_HANDOFF.md",
+        "NEPAL_MONITOR_HANDOFF.md",
+        "IMPLEMENTATION_RUNBOOK.md",
     ]:
         target = project / "docs" / name
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -78,6 +78,52 @@ def build(evidence, output, training=False):
     shutil.copytree(
         PROJECT / "data/processed/live_app", project / "data/processed/live_app"
     )
+    geography = PROJECT / "data/processed/nepal_monitor"
+    if not (geography / "manifest.json").exists():
+        raise ValueError("Prepare real Nepal river geography before packaging")
+    from pravah.replay.scenario import load_geography, load_national_rivers
+
+    load_geography(geography)  # Verify every exported geometry hash.
+    shutil.copytree(geography, project / "data/processed/nepal_monitor")
+    national_root = PROJECT / "data/processed/nepal_national"
+    load_national_rivers(national_root)
+    shutil.copytree(national_root, project / "data/processed/nepal_national")
+    from pravah.replay.lakes import load_lakes
+
+    lake_root = PROJECT / "data/processed/nepal_lakes"
+    load_lakes(lake_root)
+    shutil.copytree(lake_root, project / "data/processed/nepal_lakes")
+    from pravah.replay.image_pairs import load_image_pairs
+
+    imagery_root = PROJECT / "data/processed/nepal_imagery"
+    load_image_pairs(imagery_root)
+    shutil.copytree(imagery_root, project / "data/processed/nepal_imagery")
+    live = PROJECT / "outputs/nepal_monitor/live/latest.json"
+    if live.exists():
+        (bundle / "live_cache").mkdir()
+        content = live.read_bytes()
+        (bundle / "live_cache/latest.json").write_bytes(content)
+        cache = json.loads(content)
+        for source in cache.get("sources", {}).values():
+            preview = source.get("preview_file")
+            if preview:
+                member = live.parent / preview
+                if live.parent.resolve() not in member.resolve().parents or member.is_symlink() or sha256(member) != source["preview_sha256"]:
+                    raise ValueError("Invalid preview cache member")
+                target = bundle / "live_cache" / preview
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(member, target)
+            relative = source.get("response_file")
+            if not relative:
+                continue
+            member = live.parent / relative
+            if live.parent.resolve() not in member.resolve().parents or member.is_symlink():
+                raise ValueError("Invalid live cache member")
+            if sha256(member) != source["response_sha256"]:
+                raise ValueError("Live response checksum mismatch")
+            target = bundle / "live_cache" / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(member, target)
     # OSM geometry and provenance only; original provider responses stay local.
     for source in (PROJECT / "data/raw/app_osm").rglob("*"):
         if source.is_file() and (
@@ -101,6 +147,12 @@ def build(evidence, output, training=False):
     (bundle / "assets").mkdir()
     shutil.copy2(checkpoint, bundle / "assets/checkpoint.pt")
     shutil.copy2(evaluation, bundle / "assets/final_evaluation.json")
+    for name in ["monitor_arm64_resolution.json", "requirements-linux-arm64-py312.candidate.txt"]:
+        source = PROJECT / "outputs/nepal_replay" / name
+        if source.is_file():
+            target = bundle / "validation" / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
     save(
         bundle / "runtime_config_template.json",
         {
@@ -119,7 +171,7 @@ def build(evidence, output, training=False):
         "source_identity": "Individual hashes include the current feature-branch working files",
         "model_identity": identity,
         "model_sha256": sha256(checkpoint),
-        "scope": "Real benchmark water inference and Nepal evidence replay; downstream forecast missing",
+        "scope": "Real benchmark water inference, Nepal live monitoring and evidence replay with separate exploratory scenarios; downstream forecast missing",
         "path_only_rewrites_original_sha256": rewritten,
         "files": {
             str(p.relative_to(bundle)): sha256(p)
