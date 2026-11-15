@@ -25,7 +25,7 @@ def test_serve_renders_gpu_api_and_dashboard(tmp_path):
     assert api["resource"]["devices"]["nvidia.com/gpu"] == 1
     assert "devices" not in dash["resource"]  # dashboard needs no GPU
     assert "PRAVAH_REQUIRE_CUDA=1" in api["env"]
-    assert "PRAVAH_API_URL=http://api.service:8000" in dash["env"]
+    assert "PRAVAH_API_URL=http://api:8000" in dash["env"]
     assert "PRAVAH_DASHBOARD_PASSCODE=x" in dash["env"]
     assert api["mounts"] == {"/data": {"volume": "dataset"}} and doc["volumes"]["dataset"]["name"] == "Pravah-Dataset"
     assert all(ep["scope"] == "group" for s in (api, dash) for ep in s["network"]["endpoints"])

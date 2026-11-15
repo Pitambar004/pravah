@@ -4,8 +4,8 @@ Every call returns ``(data, error)`` instead of raising, so a down or slow API
 renders as an honest status message rather than a crashed page.
 
 ``PRAVAH_API_URL`` points at the API. Inside one Fuzzball workflow the
-dashboard reaches the API service as ``http://api.service:8000`` (service
-hostname + ``.service``), which never leaves the cluster network.
+dashboard reaches the API service as ``http://api:8000`` (service
+hostname via the search domain; ``api.service`` did not resolve on Fuzzball 4.3.1), which never leaves the cluster network.
 """
 from __future__ import annotations
 

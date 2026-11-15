@@ -1,7 +1,7 @@
 # PRAVAH web deployment: GPU inference API + Streamlit dashboard, both on Fuzzball.
 #
 #   browser (venue Wi-Fi) --HTTPS--> Fuzzball endpoint "dashboard" --> dashboard service (CPU)
-#   dashboard --http://api.service:8000 (in-workflow)--> api service (1x GB10, MiniUNet on CUDA)
+#   dashboard --http://api:8000 (in-workflow; "api.service" does not resolve on 4.3.1)--> api service (1x GB10, MiniUNet on CUDA)
 #   both services mount the Pravah-Dataset volume at /data
 #
 # Endpoint scope controls who can open the URL: user | group | organization | public.
@@ -63,7 +63,7 @@ services:
       /data:
         volume: dataset
     env:
-      - PRAVAH_API_URL=http://api.service:8000
+      - PRAVAH_API_URL=http://api:8000
       - PRAVAH_OUTPUTS_DIR=/data/outputs/predictions
     command: ["sh", "/opt/pravah/scripts/fuzzball/start_dashboard.sh"]
     network:

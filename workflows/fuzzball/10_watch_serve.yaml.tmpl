@@ -3,7 +3,7 @@
 #   anyone on the network --HTTPS--> endpoint "dashboard" --> dashboard service (Streamlit)
 #                         --HTTPS--> endpoint "api"       --> api service (1× GB10: live engine thread,
 #                                                              GRU emulator, Manning hydraulics, replay)
-#   dashboard --http://api.service:8000 (in-workflow)--> api
+#   dashboard --http://api:8000 (in-workflow; "api.service" does not resolve on 4.3.1)--> api
 #
 # Scope {{ENDPOINT_SCOPE}}: "public" lets anyone with the URL open it. Read routes are open; refresh and
 # inference writes need X-Pravah-Token (set api:PRAVAH_API_TOKEN via --env). Uses the artifacts written by
@@ -80,7 +80,7 @@ services:
         volume: dataset
     env:
       - PYTHONUNBUFFERED=1
-      - PRAVAH_API_URL=http://api.service:8000
+      - PRAVAH_API_URL=http://api:8000
       - PRAVAH_OUTPUTS_DIR=/data/outputs/predictions
     script: |
       #!/bin/sh
