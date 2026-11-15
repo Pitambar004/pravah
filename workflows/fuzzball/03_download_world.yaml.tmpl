@@ -1,0 +1,52 @@
+# Step 1 of the world training pipeline: download (or resume) WorldFloods v2 + Sen1Floods11 v1.1
+# onto the team volume from the pinned plan shipped in the image (config/training/world_download_plan.json.gz;
+# 23,956 public provider files, ~138 GB; WorldFloods is CC-BY-NC-4.0, Sen1Floods11 licence unresolved —
+# see docs/TRAINING_DATA_EXPANSION.md). Every file is verified against the provider checksum.
+# Safe to re-run: files already present and verified are recorded as verified_existing_transfer and skipped.
+# If the summary reports failures, re-run with RETRY_FAILED=1 to repair only the failed files.
+# Writes {{WORLD_ROOT}}/download_plan.json and {{WORLD_ROOT}}/audit/{download_summary.json,transfers.jsonl}.
+# CPU only. TEMPLATE — render with scripts/fuzzball/render_workflow.py; NOT validated on v4.3.1 yet.
+version: v4
+
+volumes:
+  dataset:
+    use: "{{VOLUME_PROVISIONER}}"
+    name: "{{VOLUME_NAME}}"
+
+jobs:
+  download-world:
+    image:
+      uri: "{{API_IMAGE}}"
+    mounts:
+      /data:
+        volume: dataset
+    env:
+      - PYTHONUNBUFFERED=1
+    policy:
+      timeout:
+        execute: 24h
+    script: |
+      #!/bin/sh
+      set -eu
+      ROOT="{{WORLD_ROOT}}"
+      mkdir -p "$ROOT/audit"
+      # Never overwrite a different plan already on the volume: the audit must match its plan.
+      gunzip -c /opt/pravah/config/training/world_download_plan.json.gz > /tmp/plan.json
+      (cd /tmp && sed 's/world_download_plan.json/plan.json/' /opt/pravah/config/training/world_download_plan.json.sha256 | sha256sum -c -)
+      if [ -e "$ROOT/download_plan.json" ]; then
+        cmp -s /tmp/plan.json "$ROOT/download_plan.json" || { echo "A different plan exists at $ROOT/download_plan.json; refusing" >&2; exit 2; }
+      else
+        cp /tmp/plan.json "$ROOT/download_plan.json"
+      fi
+      EXTRA=""
+      if [ "{{RETRY_FAILED}}" = "1" ]; then EXTRA="--retry-failed"; fi
+      python -u /opt/pravah/scripts/download_training_datasets.py \
+        --plan "$ROOT/download_plan.json" --root /data --report-dir "$ROOT/audit" \
+        --workers {{DOWNLOAD_WORKERS}} $EXTRA
+      python -c "import json,sys; s=json.load(open('$ROOT/audit/download_summary.json')); print(json.dumps({k: v for k, v in s.items() if not isinstance(v, (list, dict))}, indent=1))"
+    resource:
+      cpu:
+        cores: 4
+        affinity: NUMA
+      memory:
+        size: 8GiB

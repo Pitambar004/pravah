@@ -69,6 +69,7 @@ PRAVAH_TRAINING_DIR=/data/outputs/training streamlit run app/Home.py
 
 - `docs/PREDICTION_CONTRACT.md` — the files a forecast model must write so its prediction can be scored against post-event Sentinel-2 water, with cutoff/leakage checks and a persistence baseline.
 - `docs/TRAINING_GB10.md` — 1-node vs 2-node GB10 training templates (`workflows/fuzzball/05_train_*.yaml.tmpl`, unverified on v4.3.1) and how the dashboard compares them.
+- `docs/WORLD_TRAINING_PIPELINE.md` — `make world-pipeline`: download WorldFloods v2 + Sen1Floods11 to Fuzzball, prepare split-protected manifests, then benchmark 1-node vs 2-node GB10 training (unverified on v4.3.1).
 - `docs/USING_YOUR_MODEL.md` — running a trained checkpoint on a Sentinel-2 scene and loading the run in the dashboard.
 - `docs/DATA_LAYERS.md` — where each dashboard map layer comes from and how to regenerate it.
 - Sidebar pages: **Rasuwa operations** (Rasuwa Operations, Simulate Rasuwa flood, Glacier & Lake Watch) and **Model evidence** (Prediction vs Reality, Maps, Live Prediction, Alerts (simulated, never sent), Training). Other pages stay reachable by URL.

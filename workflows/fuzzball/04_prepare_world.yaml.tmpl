@@ -1,0 +1,59 @@
+# Step 2 of the world training pipeline: turn the verified downloads into training pairs and manifests.
+# scripts/download_training_prepare.py refuses to publish while any download failed, checks CRS, grid,
+# band order, class values and finite pixels, writes 512×512 six-band [B2,B3,B4,B8A,B11,B12] VRTs with
+# int16 labels (-1 invalid), and writes split-protected manifests under {{WORLD_ROOT}}/manifests/:
+#   optical_supervised.json  (recommended: hand + WorldFloods labels; Bolivia + test geographies protected)
+#   optical_with_weak.json   (adds automatic threshold labels to TRAINING only)
+# plus {{WORLD_ROOT}}/audit/training_readiness.json. Then train_ddp.py --dry-run checks the chosen manifest's
+# structure and split separation, and sampled train/val pairs are loaded through the training dataset
+# class. Optical Sentinel-2 only; Sentinel-1 resources are never mixed in.
+# CPU only. TEMPLATE — render with scripts/fuzzball/render_workflow.py; NOT validated on v4.3.1 yet.
+version: v4
+
+volumes:
+  dataset:
+    use: "{{VOLUME_PROVISIONER}}"
+    name: "{{VOLUME_NAME}}"
+
+jobs:
+  prepare-world:
+    image:
+      uri: "{{API_IMAGE}}"
+    mounts:
+      /data:
+        volume: dataset
+    env:
+      - PYTHONUNBUFFERED=1
+      - GDAL_CACHEMAX=256
+      - PRAVAH_DATASET_PAPER_URL=https://www.nature.com/articles/s41598-023-47595-7
+    policy:
+      timeout:
+        execute: 12h
+    script: |
+      #!/bin/sh
+      set -eu
+      ROOT="{{WORLD_ROOT}}"
+      test -s "$ROOT/audit/download_summary.json" || { echo "Run 03_download_world first" >&2; exit 2; }
+      python -u /opt/pravah/scripts/download_training_prepare.py --root "$ROOT" --sen1-root /data/raw/sen1floods11/v1.1
+      test -s "{{PAIRS}}" || { echo "Manifest {{PAIRS}} was not produced" >&2; exit 3; }
+      # Manifest structure + split separation (no compute), then real samples through the training loader.
+      python -u /opt/pravah/scripts/train_ddp.py --pairs "{{PAIRS}}" --output-dir /tmp/dry_run --device cpu \
+        --global-batch-size {{GLOBAL_BATCH}} --dry-run
+      python -u - "{{PAIRS}}" <<'PY'
+      import sys, torch
+      from pravah.ml.dataset import S2WaterDataset
+      for split in ("train", "val"):
+          ds = S2WaterDataset(sys.argv[1], split)
+          for i in range(0, len(ds), max(1, len(ds) // 4))[:4]:
+              x, y = ds[i]
+              assert x.shape[0] == 6 and torch.isfinite(x).all(), (split, i, tuple(x.shape))
+              assert set(torch.unique(y).tolist()) <= {-1, 0, 1}, (split, i)
+          print(split, len(ds), "pairs; sampled items load as finite 6-band tensors with labels in {-1,0,1}")
+      PY
+      python -c "import json; r=json.load(open('$ROOT/audit/training_readiness.json')); print(json.dumps({k: v.get('splits') for k, v in r.get('manifests', {}).items()}, indent=1))"
+    resource:
+      cpu:
+        cores: 8
+        affinity: NUMA
+      memory:
+        size: 16GiB

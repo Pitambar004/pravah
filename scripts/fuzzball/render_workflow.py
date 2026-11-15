@@ -37,6 +37,10 @@ DEFAULTS = {
     "EPOCHS": "3",
     "MAX_STEPS": "0",
     "MASTER_PORT": "29500",
+    # World training-data intake (03_download_world, 04_prepare_world)
+    "WORLD_ROOT": "/data/training/expanded_20261114",
+    "DOWNLOAD_WORKERS": "3",
+    "RETRY_FAILED": "0",
     # 06_inference_batch: "reflectance" for P3 s2_l1c_reflectance.tif, "dn" for raw L1C / Sen1Floods11 chips
     "INPUT_UNITS": "dn",
 }
@@ -67,8 +71,12 @@ def _check_value(key: str, value: str) -> None:
         raise RenderError("RUN_ID may only contain letters, digits, '_' and '-'")
     if key == "SCENE_ID" and not SAFE_SCENE.match(value):
         raise RenderError("SCENE_ID must be a relative .tif path under /data/raw/sentinel2 without '..'")
-    if key in ("CHECKPOINT", "PAIRS") and (not value.startswith("/data/") or ".." in value or " " in value):
+    if key in ("CHECKPOINT", "PAIRS", "WORLD_ROOT") and (not value.startswith("/data/") or ".." in value or " " in value):
         raise RenderError(f"{key} must live on the mounted volume (/data/...) without '..' or spaces")
+    if key == "DOWNLOAD_WORKERS" and not (value.isdigit() and 1 <= int(value) <= 8):
+        raise RenderError("DOWNLOAD_WORKERS must be 1-8")
+    if key == "RETRY_FAILED" and value not in ("0", "1"):
+        raise RenderError("RETRY_FAILED must be 0 or 1")
     if key == "INPUT_UNITS" and value not in ("dn", "reflectance"):
         raise RenderError("INPUT_UNITS must be dn or reflectance")
     if key in ("GLOBAL_BATCH", "EPOCHS", "MAX_STEPS", "MASTER_PORT"):

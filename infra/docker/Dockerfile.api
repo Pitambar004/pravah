@@ -27,6 +27,10 @@ COPY src ./src
 COPY scripts/fuzzball/gpu_smoke.py ./scripts/fuzzball/gpu_smoke.py
 # Same image runs training (workflows/fuzzball/05_train_*.yaml.tmpl); torchrun ships with torch.
 COPY scripts/train_ddp.py ./scripts/train_ddp.py
+# World training-data intake (workflows/fuzzball/03_download_world, 04_prepare_world): the pinned,
+# reviewed provider plan (public URLs + checksums) and the stdlib downloader / pair preparer.
+COPY scripts/download_training_datasets.py scripts/download_training_prepare.py ./scripts/
+COPY config/training/world_download_plan.json.gz config/training/world_download_plan.json.sha256 ./config/training/
 RUN pip install --no-deps . && python -c "import pravah.api.main, pravah.inference"
 
 # Fuzzball runs workloads unprivileged; code stays world-readable, data lives on /data.
