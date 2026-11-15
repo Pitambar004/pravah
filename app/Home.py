@@ -55,7 +55,8 @@ if _PASSCODE and not st.session_state.get("pv_authed"):
 
 # Main pages: the only ones in the sidebar. Each maps to a project goal.
 PAGES = [
-    st.Page("views/nepal_monitor.py", title="Rasuwa Operations", icon=":material/water:", url_path="nepal", default=True),
+    st.Page("views/watch.py", title="Live Watch 24/7", icon=":material/monitor_heart:", url_path="watch", default=True),
+    st.Page("views/nepal_monitor.py", title="Rasuwa Operations", icon=":material/water:", url_path="nepal"),
     st.Page("views/simulate.py", title="Simulate Rasuwa flood", icon=":material/play_circle:", url_path="simulate"),
     st.Page("views/lakes.py", title="Glacier & Lake Watch", icon=":material/landscape:", url_path="lakes"),
     st.Page("views/validation.py", title="Prediction vs Reality", icon=":material/fact_check:", url_path="validation"),
@@ -78,7 +79,7 @@ HIDDEN_PAGES = [
     st.Page("views/methodology.py", title="Sources & Methodology", icon=":material/menu_book:", url_path="methodology"),
 ]
 current = st.navigation(PAGES + HIDDEN_PAGES, position="hidden")
-OPERATIONS = {"Rasuwa Operations", "Simulate Rasuwa flood", "Glacier & Lake Watch"}
+OPERATIONS = {"Live Watch 24/7", "Rasuwa Operations", "Simulate Rasuwa flood", "Glacier & Lake Watch"}
 operating_page = current.title in OPERATIONS
 
 _MARK = (
@@ -97,7 +98,7 @@ with st.sidebar:
         '<div class="pv-brand-sub">Water &amp; flood evidence</div></div></div>'
     )
     navigation_groups = (
-        ("Monitor", ("Rasuwa Operations", "River Outlook", "Glacier & Lake Watch")),
+        ("Monitor", ("Live Watch 24/7", "Rasuwa Operations", "River Outlook", "Glacier & Lake Watch")),
         ("Explore", ("Maps", "Simulate Rasuwa flood", "Prediction vs Reality")),
         ("Model workspace", ("Live Prediction", "Alerts", "Training")),
     )

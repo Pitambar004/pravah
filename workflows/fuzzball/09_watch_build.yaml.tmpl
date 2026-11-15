@@ -1,0 +1,75 @@
+# PRAVAH Live Watch build — two GB10 jobs in PARALLEL (no dependency between them, one GPU each).
+#   watch-build-a  (GB10 #1): ERA5 + GloFAS 1984→now history, then a 5-member GRU emulator ensemble
+#                             trained by 5 concurrent workers (bf16, batch 1024, data resident on GPU).
+#   watch-build-b  (GB10 #2): Copernicus DEM, river model + exposure index, Sentinel-2/1 history
+#                             (5 concurrent pass workers × 8 read threads), width fits, lake/glacier
+#                             baselines (GPU feature tracking), Aug-2026 replay pack.
+# Both write to {{WATCH_ROOT}} on the shared volume; steps are resumable (steps/*.done.json).
+# Render in bundle mode with scripts/fuzzball/prepare_watch_bundle.py. Jobs need outbound HTTPS
+# (Open-Meteo, Planetary Computer, AWS Copernicus DEM, USGS, PyPI).
+# TEMPLATE — NOT validated on v4.3.1 until a real run succeeds.
+version: v4
+
+volumes:
+  dataset:
+    use: "{{VOLUME_PROVISIONER}}"
+    name: "{{VOLUME_NAME}}"
+
+jobs:
+  watch-build-a:
+    image:
+      uri: "{{API_IMAGE}}"
+    mounts:
+      /data:
+        volume: dataset
+    env:
+      - PYTHONUNBUFFERED=1
+      - PRAVAH_WATCH_ROOT={{WATCH_ROOT}}
+    script: |
+      #!/bin/sh
+      set -eu
+      WHEELS=/data/training/expanded_20261114/environment/wheels
+      (cd "$WHEELS" && sha256sum -c --quiet SHA256SUMS)
+      python -m pip install --disable-pip-version-check --no-index --no-deps --find-links "$WHEELS" rasterio==1.5.2 affine==3.0.1 >/dev/null
+      python -m pip install --disable-pip-version-check "httpx>=0.25" "shapely>=2.0" "pyproj>=3.5" "geopandas>=0.14" "python-dotenv>=1.0" >/dev/null
+      export PRAVAH_WATCH_ASSETS="${CODE:-/opt/pravah}/data/processed"
+      python -c "import torch; assert torch.cuda.is_available(); print('GPU', torch.cuda.get_device_name(0), flush=True)"
+      nvidia-smi --query-gpu=name,memory.total,utilization.gpu --format=csv || true
+      python -m pravah.watch.build --out {{WATCH_ROOT}} --steps history,emulator --workers {{WATCH_WORKERS}} --members {{EMULATOR_MEMBERS}} --epochs {{EMULATOR_EPOCHS}}
+    resource:
+      cpu:
+        cores: 16
+        affinity: NUMA
+      memory:
+        size: 96GiB
+      devices:
+        nvidia.com/gpu: 1
+
+  watch-build-b:
+    image:
+      uri: "{{API_IMAGE}}"
+    mounts:
+      /data:
+        volume: dataset
+    env:
+      - PYTHONUNBUFFERED=1
+      - PRAVAH_WATCH_ROOT={{WATCH_ROOT}}
+      - GDAL_CACHEMAX=2048
+    script: |
+      #!/bin/sh
+      set -eu
+      WHEELS=/data/training/expanded_20261114/environment/wheels
+      (cd "$WHEELS" && sha256sum -c --quiet SHA256SUMS)
+      python -m pip install --disable-pip-version-check --no-index --no-deps --find-links "$WHEELS" rasterio==1.5.2 affine==3.0.1 >/dev/null
+      python -m pip install --disable-pip-version-check "httpx>=0.25" "shapely>=2.0" "pyproj>=3.5" "geopandas>=0.14" "python-dotenv>=1.0" >/dev/null
+      export PRAVAH_WATCH_ASSETS="${CODE:-/opt/pravah}/data/processed"
+      python -c "import torch; assert torch.cuda.is_available(); print('GPU', torch.cuda.get_device_name(0), flush=True)"
+      python -m pravah.watch.build --out {{WATCH_ROOT}} --steps river,satellite,replay --workers {{WATCH_WORKERS}} --s2-per-month {{S2_PER_MONTH}}
+    resource:
+      cpu:
+        cores: 16
+        affinity: NUMA
+      memory:
+        size: 96GiB
+      devices:
+        nvidia.com/gpu: 1
