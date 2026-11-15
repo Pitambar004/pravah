@@ -16,8 +16,10 @@ dependencies = [
 ml = ["torch>=2.2"]
 catalog = ["pystac-client>=0.7"]
 ui = ["streamlit>=1.35", "folium>=0.16"]
-dev = ["pytest>=8", "ruff>=0.6"]
-full = ["torch>=2.2", "pystac-client>=0.7", "streamlit>=1.35", "folium>=0.16", "pytest>=8", "ruff>=0.6"]
+api = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
+dev = ["pytest>=8", "ruff>=0.6", "pyyaml>=6"]
+full = ["torch>=2.2", "pystac-client>=0.7", "streamlit>=1.35", "folium>=0.16", "fastapi>=0.110",
+        "uvicorn[standard]>=0.29", "pytest>=8", "ruff>=0.6"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

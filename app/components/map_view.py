@@ -20,7 +20,8 @@ from app.theme import FONT_MONO, FONT_SANS, TOKENS
 RASUWA_CENTER = [28.150, 85.350]
 LEAFLET_VERSION = "1.9.4"
 
-GROUP_ORDER = ["Geographic context", "Satellite evidence", "Infrastructure", "Scenarios", "Validation"]
+GROUP_ORDER = ["Geographic context", "Satellite evidence", "Change vs pre-event", "Infrastructure", "Scenarios",
+               "Validation"]
 
 KIND_LABELS = {
     "context": "Context",
@@ -107,6 +108,58 @@ def _slim_geojson(data: dict[str, Any] | None) -> dict[str, Any] | None:
     }
 
 
+def _context_layer(artifacts: Any, key: str, layer_id: str, name: str, color: str) -> MapLayer:
+    data = (getattr(artifacts, "context_layers", None) or {}).get(key)
+    meta = (data or {}).get("pravah_layer") or {}
+    return MapLayer(id=layer_id, name=name, group="Geographic context", kind="context", color=color,
+                    data=_slim_geojson(data), fill=False, opacity=0.8, visible=layer_id == "rivers",
+                    source=meta.get("source", "—"), timestamp=meta.get("source", "—").split("snapshot ")[-1],
+                    description=meta.get("filter", ""), limitation=meta.get("note", ""),
+                    unavailable_reason="Not yet ingested (scripts/build_context_layers.py)")
+
+
+def _change_layers(artifacts: Any) -> list[MapLayer]:
+    """Pre/post change layers; only present when a change analysis exists for the run."""
+    summary = getattr(artifacts, "change_summary", None)
+    if not summary:
+        return []
+    pre = (summary.get("pre_acquired_at_utc") or "")[:10]
+    post = (summary.get("post_acquired_at_utc") or "")[:10]
+    span = f"{pre} → {post}"
+    src = f"change_vs_pre.tif ({summary.get('pre_run_id')} vs {summary.get('post_run_id')})"
+    limit = ("Change between two model outputs on pixels cloud-free on both dates. Cloud/terrain shadow and "
+             "different viewing geometry can create apparent change. Not a forecast.")
+    return [
+        MapLayer(id="change_new", name="Water newly detected", group="Change vs pre-event", kind="model",
+                 color=TOKENS["danger"], data=_slim_geojson(getattr(artifacts, "change_new_water_geojson", None)),
+                 opacity=0.6, source=src, timestamp=span,
+                 description="Pixels classed no-water on the pre-event date and water on the post-event date.",
+                 limitation=limit, unavailable_reason="No newly detected water in comparable pixels"),
+        MapLayer(id="change_lost", name="Water no longer detected", group="Change vs pre-event", kind="model",
+                 color=TOKENS["text_muted"], data=_slim_geojson(getattr(artifacts, "change_lost_water_geojson", None)),
+                 opacity=0.45, visible=False, source=src, timestamp=span,
+                 description="Pixels classed water on the pre-event date and no-water on the post-event date.",
+                 limitation=limit, unavailable_reason="No water-loss pixels in comparable area"),
+    ]
+
+
+def _exposure_layers(artifacts: Any, fixture: str) -> list[MapLayer]:
+    feats = getattr(artifacts, "exposure_features", None) or {}
+    specs = [("buildings", "Buildings in mapped extent", "OSM building footprints intersecting the mapped water extent."),
+             ("roads", "Roads in mapped extent", "OSM highway segments clipped to the mapped water extent."),
+             ("bridges", "Bridges in mapped extent", "OSM bridge-tagged ways intersecting the mapped water extent.")]
+    exp = getattr(artifacts, "exposure_summary", None) or {}
+    osm_date = exp.get("osm_snapshot_timestamp") or exp.get("source_snapshot") or "—"
+    return [
+        MapLayer(id=cat, name=name, group="Infrastructure", kind="derived", color=TOKENS["map_exposure"],
+                 data=_slim_geojson(feats.get(cat)), fill=cat == "buildings", opacity=0.7,
+                 source=f"exposure_{cat}.geojson · OSM {osm_date}{fixture}", timestamp=f"OSM snapshot {osm_date}",
+                 description=desc, limitation="Intersection indicates potential exposure, not damage.",
+                 unavailable_reason="No exposure feature layer exported")
+        for cat, name, desc in specs
+    ]
+
+
 def build_layers(artifacts: Any, show_retrospective: bool = True) -> list[MapLayer]:
     """Build the standard layer stack from loaded run artifacts.
 
@@ -123,10 +176,8 @@ def build_layers(artifacts: Any, show_retrospective: bool = True) -> list[MapLay
             limitation="Pixels outside the AOI or occluded by cloud are invalid (class 255), never 'no water'.",
             unavailable_reason="No AOI GeoJSON in config/aois/",
         ),
-        MapLayer(id="admin", name="Administrative boundaries", group="Geographic context", kind="context",
-                 color=TOKENS["text_muted"], unavailable_reason="Not yet ingested"),
-        MapLayer(id="rivers", name="River network", group="Geographic context", kind="context",
-                 color=TOKENS["accent"], unavailable_reason="Not yet ingested"),
+        _context_layer(artifacts, "admin_boundaries", "admin", "Administrative boundaries", TOKENS["text_muted"]),
+        _context_layer(artifacts, "rivers", "rivers", "River network", TOKENS["text_secondary"]),
         MapLayer(
             id="water", name="Model-derived water extent", group="Satellite evidence", kind="model",
             color=TOKENS["map_water"], data=_slim_geojson(artifacts.water_geojson), opacity=0.55,
@@ -139,14 +190,8 @@ def build_layers(artifacts: Any, show_retrospective: bool = True) -> list[MapLay
         ),
         MapLayer(id="imagery", name="Sentinel-2 scene preview", group="Satellite evidence", kind="observed",
                  color=TOKENS["accent"], unavailable_reason="No preview tiles generated (GeoTIFFs are not loaded in-browser)"),
-        MapLayer(id="buildings", name="Buildings in mapped extent", group="Infrastructure", kind="derived",
-                 color=TOKENS["map_exposure"], unavailable_reason="No exposure feature layer exported",
-                 description="OSM building footprints intersecting the mapped water extent.",
-                 limitation="Intersection indicates potential exposure, not damage."),
-        MapLayer(id="roads", name="Roads in mapped extent", group="Infrastructure", kind="derived",
-                 color=TOKENS["map_exposure"], unavailable_reason="No exposure feature layer exported"),
-        MapLayer(id="bridges", name="Bridges in mapped extent", group="Infrastructure", kind="derived",
-                 color=TOKENS["map_exposure"], unavailable_reason="No exposure feature layer exported"),
+        *_change_layers(artifacts),
+        *_exposure_layers(artifacts, fixture),
         MapLayer(id="susceptibility", name="Terrain susceptibility", group="Scenarios", kind="scenario",
                  color=TOKENS["map_scenario"], unavailable_reason="No scenario model has been run"),
         MapLayer(id="inundation", name="Hypothetical inundation", group="Scenarios", kind="scenario",

@@ -4,6 +4,7 @@ Safely reads output artifacts from outputs/<run_id>/ complying with docs/contrac
 Never crashes on missing, empty, or malformed files.
 """
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,20 @@ class RunArtifacts:
     aoi_geojson: dict[str, Any] | None = None
     unosat_geojson: dict[str, Any] | None = None
     
+    # Set when artifacts were fetched over HTTP from the inference API (e.g. on Fuzzball)
+    remote_source: str | None = None
+
+    # Optional pre/post change analysis (scripts/compare_observations.py) in a post-event run
+    change_summary: dict[str, Any] | None = None
+    change_new_water_geojson: dict[str, Any] | None = None
+    change_lost_water_geojson: dict[str, Any] | None = None
+
+    # Optional per-category exposure features (scripts/exposure.py --features-dir)
+    exposure_features: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    # Study-area context layers shared by all runs (scripts/build_context_layers.py)
+    context_layers: dict[str, dict[str, Any]] = field(default_factory=dict)
+
     # Status flags & diagnostics
     missing_files: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -54,6 +69,20 @@ class RunArtifacts:
             or self.observed_water_tif
             or self.water_geojson
         )
+
+
+EXPOSURE_FEATURE_CATEGORIES = ("buildings", "roads", "bridges")
+CONTEXT_LAYER_FILES = ("rivers", "admin_boundaries")
+
+RUN_MARKER_FILES = (
+    "observed_metadata.json", "exposure_summary.json", "benchmark.json", "observed_water.tif", "job.json",
+)
+
+
+def run_has_artifacts(run_folder: Path | str) -> bool:
+    """True when a run folder contains at least one known run artifact."""
+    p = Path(run_folder)
+    return p.is_dir() and any((p / f).exists() for f in RUN_MARKER_FILES)
 
 
 def discover_available_runs(outputs_dir: Path | str = "outputs") -> list[str]:
@@ -165,6 +194,35 @@ def load_run_artifacts(
                 elif err:
                     artifacts.errors.append(err)
 
+        # 6. Optional analyses (absent files are simply not shown; never synthesised)
+        change, err = safe_read_json(path / "change_summary.json")
+        if change:
+            artifacts.change_summary = change
+            for name, attr in (("change_new_water.geojson", "change_new_water_geojson"),
+                               ("change_lost_water.geojson", "change_lost_water_geojson")):
+                geo, gerr = safe_read_geojson(path / name)
+                if geo:
+                    setattr(artifacts, attr, geo)
+                elif gerr:
+                    artifacts.errors.append(gerr)
+        elif err:
+            artifacts.errors.append(err)
+        for category in EXPOSURE_FEATURE_CATEGORIES:
+            geo, gerr = safe_read_geojson(path / f"exposure_{category}.geojson")
+            if geo:
+                artifacts.exposure_features[category] = geo
+            elif gerr:
+                artifacts.errors.append(gerr)
+
+    # Study-area context layers (rivers, admin boundaries); cleared below in fixture mode
+    context_dir = Path(os.environ.get("PRAVAH_CONTEXT_DIR", "data/processed/context"))
+    for name in CONTEXT_LAYER_FILES:
+        geo, gerr = safe_read_geojson(context_dir / f"{name}.geojson")
+        if geo:
+            artifacts.context_layers[name] = geo
+        elif gerr:
+            artifacts.errors.append(gerr)
+
     # Check for core AOI in config/
     aoi_candidates = [
         Path("config/aois/aoi_core.geojson"),
@@ -182,6 +240,7 @@ def load_run_artifacts(
     if not artifacts.has_any_artifacts and allow_synthetic_fallback:
         artifacts.is_synthetic = True
         artifacts.run_id = "synthetic_fixture_demo"
+        artifacts.context_layers = {}  # never mix real context into fixture mode
         artifacts.observed_metadata = SYNTHETIC_OBSERVED_METADATA
         artifacts.exposure_summary = SYNTHETIC_EXPOSURE_SUMMARY
         artifacts.benchmark = SYNTHETIC_BENCHMARK

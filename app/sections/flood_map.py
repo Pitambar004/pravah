@@ -52,7 +52,7 @@ def render_flood_map_section(ctx: AppContext) -> None:
 
     render_map_workspace(layers, height=720, mode="full", synthetic=a.is_synthetic)
 
-    tab_layers, tab_features = st.tabs(["Layer catalogue", "Water feature attributes"])
+    tab_layers, tab_features, tab_change = st.tabs(["Layer catalogue", "Water feature attributes", "Pre/post change"])
     with tab_layers:
         st.dataframe(
             [
@@ -90,3 +90,32 @@ def render_flood_map_section(ctx: AppContext) -> None:
             )
         else:
             render_section_header("No water polygons", "Stitch inference tiles and run scripts/exposure.py to produce them.")
+    with tab_change:
+        render_change_summary(a.change_summary)
+
+
+def render_change_summary(summary: dict | None) -> None:
+    """Tabular pre/post change summary from change_summary.json (counts measured, never estimated)."""
+    if not summary:
+        render_section_header(
+            "No change analysis for this run",
+            "Select a post-event run and run scripts/compare_observations.py --pre <run> --post <run>.")
+        return
+    area = summary.get("area_km2") or {}
+    pc = summary.get("pixel_counts") or {}
+    render_section_header(
+        f"{(summary.get('pre_acquired_at_utc') or '')[:10]} → {(summary.get('post_acquired_at_utc') or '')[:10]}",
+        f"{summary.get('pre_run_id')} vs {summary.get('post_run_id')} · same model: {summary.get('same_model')} · "
+        f"comparable: {summary.get('comparable_fraction_of_grid', 0) * 100:.1f}% of grid",
+    )
+    labels = {"stable_no_water": "No water on both dates", "persistent_water": "Water on both dates",
+              "new_water": "Water newly detected", "water_no_longer_detected": "Water no longer detected",
+              "not_comparable": "Not comparable (cloud / no data on either date)"}
+    st.dataframe([{"Class": labels.get(k, k), "Area (km²)": area.get(k), "Pixels": pc.get(k)} for k in labels],
+                 hide_index=True, width="stretch",
+                 column_config={"Area (km²)": st.column_config.NumberColumn(format="%.3f"),
+                                "Pixels": st.column_config.NumberColumn(format="%d")})
+    w = summary.get("water_km2_within_comparable") or {}
+    st.caption(f"Water inside the comparable area: pre {w.get('pre')} km² → post {w.get('post')} km².")
+    for lim in summary.get("interpretation_limits") or []:
+        st.caption(f"• {lim}")

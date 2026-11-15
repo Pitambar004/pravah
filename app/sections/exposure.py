@@ -86,6 +86,8 @@ def render_exposure_section(ctx: AppContext) -> None:
         with col:
             render_metric_card(**spec)
 
+    render_pre_event_baseline(a, exp)
+
     col_map, col_side = st.columns([3, 2])
     with col_map:
         render_section_header("Exposure map", "Water extent with study boundary. Infrastructure feature layers appear when exported.")
@@ -110,3 +112,50 @@ def render_exposure_section(ctx: AppContext) -> None:
     )
     with st.expander("Raw exposure_summary.json"):
         st.json(exp)
+
+
+def _pre_event_exposure(a) -> tuple[dict | None, str | None]:
+    """Exposure summary of the pre-event run this post-event run was compared against."""
+    pre_id = (getattr(a, "change_summary", None) or {}).get("pre_run_id")
+    folder = getattr(a, "folder", None)
+    if not pre_id or folder is None or getattr(a, "remote_source", None):
+        return None, pre_id
+    from app.data_loader import safe_read_json
+
+    data, _ = safe_read_json(folder.parent / pre_id / "exposure_summary.json")
+    return data, pre_id
+
+
+def render_pre_event_baseline(a, exp: dict) -> None:
+    """Same metrics on the pre-event image. Intersections that already exist before the event
+    (rivers, shadow, mixed pixels) are a baseline, not event impact."""
+    pre, pre_id = _pre_event_exposure(a)
+    if not pre:
+        return
+    cs = a.change_summary or {}
+
+    def row(label, key, scale=1.0, digits=0):
+        def v(d):
+            x = d.get(key)
+            return None if x is None else round(x / scale, digits) if digits else int(x / scale)
+        return {"Metric": label, f"Pre-event {(cs.get('pre_acquired_at_utc') or '')[:10]}": v(pre),
+                f"Post-event {(cs.get('post_acquired_at_utc') or '')[:10]}": v(exp)}
+
+    render_section_header(
+        "Pre-event baseline",
+        f"Same OSM snapshot and method on the pre-event image ({pre_id}). Whole valid area of each date; "
+        "cloud cover differs between dates.")
+    st.dataframe([
+        row("Valid (cloud-free) area, km²", "valid_coverage_area_m2", 1e6, 1),
+        row("Model water area, km²", "water_area_m2", 1e6, 2),
+        row("Buildings intersecting water", "building_footprints_intersecting"),
+        row("Road length intersecting water, km", "road_length_m_intersecting", 1e3, 1),
+        row("Bridge-tagged features intersecting", "bridge_tagged_features_intersecting"),
+    ], hide_index=True, width="stretch")
+    pb, qb = pre.get("building_footprints_intersecting"), exp.get("building_footprints_intersecting")
+    if pb is not None and qb is not None and pb >= qb:
+        render_callout(
+            f"The pre-event image already shows {pb:,} buildings intersecting model water (post-event: {qb:,}). "
+            "Intersections at this level before the event point to over-detection (cloud/terrain shadow, river-edge "
+            "mixed pixels), so these post-event counts are <strong>not evidence of flood impact</strong>.",
+            title="No exposure increase over the pre-event baseline", variant="warning")
