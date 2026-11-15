@@ -58,7 +58,7 @@ python scripts/download_assets.py --manifest data/manifests/reviewed_downloads_p
 python scripts/exposure.py --mask outputs/stitched/observed_water.tif --buildings data/processed/buildings.gpkg --roads data/processed/roads.gpkg --osm-date VERIFIED_OSM_SNAPSHOT --out outputs/stitched/exposure_summary.json --polygons-out outputs/stitched/model_water.geojson
 ```
 
-The `download_assets.py` manifest contains real provider URLs; do not commit signed URLs or secrets. These commands are templates that will fail until source-verified paths exist. `scripts/discover_stac.py` requires optional `.[catalog]`.
+The `download_assets.py` manifest contains real provider URLs; do not commit signed URLs or secrets. These commands are templates that will fail until source-verified paths exist. `scripts/discover_stac.py` requires optional `.[catalog]`
 
 ## Prediction vs Reality, live maps, alerts and GB10 training
 
