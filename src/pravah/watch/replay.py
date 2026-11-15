@@ -82,7 +82,7 @@ def build_frames(pack: dict, river_model, emulator, baselines: dict, glacier_bas
         down = None
         if any(sources.values()):
             need_poly = last_poly is None or a["level"] != last_level or clock.hour % 6 == 0 or glof is not None
-            down = river_model.run({k: v for k, v in sources.items() if v}, glof=glof, polygons=need_poly)
+            down = river_model.run({k: v for k, v in sources.items() if v}, glof=glof, polygons=need_poly, month=clock.month)
             if need_poly:
                 last_poly = {k: down.get(k) for k in ("extent_median", "extent_max", "exposed_points_max")}
             else:

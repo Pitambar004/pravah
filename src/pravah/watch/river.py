@@ -174,8 +174,9 @@ class RiverModel:
 
     # discharge along the stem from station values (linear in chainage, flat beyond the ends)
     def along(self, station_q: dict[str, float]) -> np.ndarray:
-        pts = [(s["chainage_m"], station_q[s["station_id"]]) for s in self.meta["stations"]
-               if station_q.get(s["station_id"]) is not None]
+        pts = [(s["chainage_m"], float(station_q[s["station_id"]])) for s in self.meta["stations"]
+               if station_q.get(s["station_id"]) is not None and np.isfinite(station_q[s["station_id"]])
+               and station_q[s["station_id"]] > 0]
         if not pts:
             raise ValueError("No discharge at any main-stem station")
         ch, q = zip(*pts)
@@ -207,10 +208,27 @@ class RiverModel:
         n = np.array([c[1] for c in cols])
         return Q, n, labels
 
-    def run(self, sources: dict, glof: dict | None = None, polygons: bool = True) -> dict:
+    def normal_flow(self, month: int) -> dict[str, float]:
+        """Monthly median (GloFAS 2016–2025 climatology) per station: the 'normal river' reference."""
+        return {s["station_id"]: (s.get("monthly_climatology_m3s") or {}).get(f"{month:02d}", {}).get("p50")
+                for s in self.meta["stations"]}
+
+    def run(self, sources: dict, glof: dict | None = None, polygons: bool = True, month: int | None = None) -> dict:
+        import datetime as _dt
         t0 = time.perf_counter()
         Q, n, labels = self.members(sources, glof)
+        month = month or _dt.datetime.now(_dt.timezone.utc).month
+        base_q = self.normal_flow(month)
+        has_base = any(v for v in base_q.values())
+        if has_base:  # solve the normal-flow reference in the same GPU batch
+            Q = np.concatenate([Q, self.along(base_q)[:, None]], 1)
+            n = np.append(n, MANNING_N[1])
         res = hydro.normal_depth(self.sec, Q, n, device=self.device)
+        base_res = None
+        if has_base:
+            base_res = {k: v[:, -1:] for k, v in res.items() if isinstance(v, np.ndarray)}
+            res = {k: (v[:, :-1] if isinstance(v, np.ndarray) else v) for k, v in res.items()}
+            Q = Q[:, :-1]
         hyd_s = time.perf_counter() - t0
         origin = glof.get("origin_chainage_m", 0.0) if glof else 0.0
         arrival = hydro.arrival_hours(self.sec, res["velocity_ms"], origin)
@@ -218,13 +236,18 @@ class RiverModel:
         for kind, a in self.assets.items():
             idx = {"section": a["section"].astype(int), "offset_m": a["offset_m"], "inside": np.ones(len(a["section"]), bool),
                    "ground_z": a["ground_z"]}
-            hit = hydro.flooded(idx, res)                                     # (N, M)
+            raw = hydro.flooded(idx, res)                                     # (N, M)
+            # Newly exposed = wet under the member but dry at this month's normal flow. Assets already
+            # "wet" at normal flow sit within one 30 m DEM cell of the channel (resolution artefact).
+            hit = raw & ~hydro.flooded(idx, base_res) if base_res is not None else raw
             w = a["w"][:, None]
             per_member = (hit * w).sum(0)
-            exposure[kind] = {"median": float(np.median(per_member)), "max": float(per_member.max()),
-                              "min": float(per_member.min()), "units": "km" if kind == "roads" else "count"}
-            if kind == "roads":
-                exposure[kind] = {k: (v / 1000 if isinstance(v, float) else v) for k, v in exposure[kind].items()}
+            raw_member = (raw * w).sum(0)
+            scale = 1000.0 if kind == "roads" else 1.0
+            exposure[kind] = {"median": float(np.median(per_member)) / scale, "max": float(per_member.max()) / scale,
+                              "min": float(per_member.min()) / scale, "units": "km" if kind == "roads" else "count",
+                              "in_wet_extent_max": float(raw_member.max()) / scale,
+                              "semantics": "newly exposed vs monthly normal flow" if base_res is not None else "in wet extent"}
             exposure[kind]["per_reach_max"] = {}
             worst = int(np.argmax(per_member))
             for r in self.meta["reaches"]:
@@ -256,6 +279,7 @@ class RiverModel:
                 "section_full_fraction": float(res["section_full"][s].mean()),
             })
         out = {"members": labels, "member_count": len(labels), "reaches": reaches, "exposure": exposure,
+               "normal_flow_reference": {"month": month, "station_q_m3s": base_q} if base_res is not None else None,
                "device": res["device"], "hydraulics_seconds_measured": round(hyd_s, 4),
                "glof": glof, "method": "Manning normal depth on DEM sections + W=aQ^b + emulator/GloFAS discharge"}
         if polygons:

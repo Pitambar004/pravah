@@ -420,3 +420,20 @@ def test_api_replaces_non_finite_numbers_with_null(tmp_path):
     body = TestClient(app).get("/api/v1/watch/state").json()
     assert body["assessment"]["x"] is None and body["downstream"]["r"] == [1.0, None, 2.5]
     assert body["non_finite_fields"] == [".assessment.x", ".downstream.r[1]"]
+
+
+def test_nan_station_discharge_is_ignored_and_exposure_is_relative_to_normal_flow(tmp_path, monkeypatch):
+    from pravah.watch import river as river_mod
+    river, dem_p, geo = _synthetic_world(tmp_path)
+    monkeypatch.setattr(river_mod, "RIVER_SOURCE_HINT", river[0])
+    monkeypatch.setattr(river_mod, "RIVER_SINK_HINT", river[-1])
+    river_mod.build_river_model(geo, [dem_p], tmp_path / "cells.json", tmp_path / "rm")
+    rm = river_mod.RiverModel(tmp_path / "rm", device="cpu")
+    out = rm.run({"glofas_median": {"UP": float("nan"), "DN": 100.0}}, month=8)   # p50 = 100 in the fixture
+    assert all(np.isfinite(r["discharge_m3s"][1]) for r in out["reaches"])
+    assert out["exposure"]["buildings"]["max"] == 0       # normal flow exposes nothing new
+    coords = json.dumps(out["extent_max"])
+    assert "Infinity" not in coords and "NaN" not in coords
+    big = rm.run({"glofas_median": {"UP": 100.0, "DN": 100.0}}, glof=hydro.glof_peak(4e5) | {"origin_chainage_m": 0.0}, month=8)
+    assert big["exposure"]["buildings"]["max"] >= out["exposure"]["buildings"]["max"]
+    assert big["normal_flow_reference"]["month"] == 8

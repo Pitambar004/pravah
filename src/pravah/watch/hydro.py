@@ -333,10 +333,15 @@ def extent_polygon(sec: Sections, left_m: np.ndarray, right_m: np.ndarray):
     import geopandas as gpd
     from shapely.geometry import Polygon
     from shapely.ops import unary_union
+    lim = float(np.abs(sec.offsets_m).max())
+    ok = np.isfinite(left_m) & np.isfinite(right_m) & (left_m >= right_m)   # sections with a wet extent
+    left_m, right_m = np.clip(np.nan_to_num(left_m), -lim, lim), np.clip(np.nan_to_num(right_m), -lim, lim)
     lx, ly = sec.cx + sec.nx * left_m, sec.cy + sec.ny * left_m
     rx, ry = sec.cx + sec.nx * right_m, sec.cy + sec.ny * right_m
     quads = []
     for i in range(len(sec.cx) - 1):
+        if not (ok[i] and ok[i + 1]):
+            continue
         q = Polygon([(lx[i], ly[i]), (lx[i + 1], ly[i + 1]), (rx[i + 1], ry[i + 1]), (rx[i], ry[i])])
         if q.is_valid and q.area > 0:
             quads.append(q)
