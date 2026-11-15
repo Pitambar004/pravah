@@ -169,3 +169,26 @@ def test_bundle_mode_runs_repo_code_on_stock_image(tmp_path):
                                  ["--bundle", "fb://group/pravah/b.tar.gz"]])
 def test_bundle_mode_rejects_bad_inputs(tmp_path, bad):
     assert rw.main([str(TMPL / "03_download_world.yaml.tmpl"), *IMG, *bad, "--out", str(tmp_path / "x.yaml")]) == 2
+
+
+def test_private_api_service_stages_checked_model(tmp_path):
+    out = tmp_path / "api.yaml"
+    ck = "fb://group/pravah/models/m/checkpoint_best.pt"
+    assert rw.main([str(TMPL / "08_api_gpu.yaml.tmpl"), *IMG, "--bundle", "fb://group/pravah/b.tar.gz",
+                    "--bundle-sha256", SHA, "--ingress", f"{ck}=checkpoint_best.pt",
+                    "--set", f"CHECKPOINT_SHA256={'b' * 64}", "--out", str(out)]) == 0
+    doc = yaml.safe_load(out.read_text())
+    api = doc["services"]["api"]
+    assert "endpoints" not in api["network"]  # private: reach it only via port-forward
+    assert api["resource"]["devices"]["nvidia.com/gpu"] == 1 and api["image"]["uri"] == rw.BUNDLE_IMAGE
+    assert [i["source"]["uri"] for i in doc["volumes"]["transfer"]["ingress"]][1] == ck
+    assert f'echo "{"b" * 64}  /transfer/in/checkpoint_best.pt" | sha256sum -c -' in api["script"]
+    assert "PRAVAH_INPUT_UNITS=reflectance" in api["env"]
+
+
+@pytest.mark.parametrize("bad", [["--ingress", "https://x/c.pt=c.pt"], ["--ingress", "fb://g/c.pt=../c.pt"],
+                                 ["--set", "CHECKPOINT_SHA256=xyz"]])
+def test_private_api_rejects_bad_inputs(tmp_path, bad):
+    args = [str(TMPL / "08_api_gpu.yaml.tmpl"), *IMG, "--bundle", "fb://group/pravah/b.tar.gz", "--bundle-sha256", SHA,
+            "--set", f"CHECKPOINT_SHA256={'b' * 64}", *bad, "--out", str(tmp_path / "x.yaml")]
+    assert rw.main(args) == 2

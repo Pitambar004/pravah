@@ -42,6 +42,9 @@ DEFAULTS = {
     "WORLD_ROOT": "/data/training/expanded_20261114",
     "DOWNLOAD_WORKERS": "3",
     "RETRY_FAILED": "0",
+    # Private GPU API (08_api_gpu)
+    "MODEL_DIR": "/data/models/pravah/unet_mps_20261115T021950Z",
+    "SCENES_DIR": "/data/outputs/p3_audit_20261114T214402Z/s2_prepared_full",
     # 06_inference_batch: "reflectance" for P3 s2_l1c_reflectance.tif, "dn" for raw L1C / Sen1Floods11 chips
     "INPUT_UNITS": "dn",
 }
@@ -72,7 +75,9 @@ def _check_value(key: str, value: str) -> None:
         raise RenderError("RUN_ID may only contain letters, digits, '_' and '-'")
     if key == "SCENE_ID" and not SAFE_SCENE.match(value):
         raise RenderError("SCENE_ID must be a relative .tif path under /data/raw/sentinel2 without '..'")
-    if key in ("CHECKPOINT", "PAIRS", "WORLD_ROOT") and (not value.startswith("/data/") or ".." in value or " " in value):
+    if key == "CHECKPOINT_SHA256" and not SHA256.match(value):
+        raise RenderError("CHECKPOINT_SHA256 must be 64 lowercase hex characters")
+    if key in ("CHECKPOINT", "PAIRS", "WORLD_ROOT", "MODEL_DIR", "SCENES_DIR") and (not value.startswith("/data/") or ".." in value or " " in value):
         raise RenderError(f"{key} must live on the mounted volume (/data/...) without '..' or spaces")
     if key == "DOWNLOAD_WORKERS" and not (value.isdigit() and 1 <= int(value) <= 8):
         raise RenderError("DOWNLOAD_WORKERS must be 1-8")
@@ -159,7 +164,8 @@ SHA256 = re.compile(r"^[0-9a-f]{64}$")
 FB_URI = re.compile(r"^fb://[A-Za-z0-9_./-]+$")
 
 
-def apply_bundle(doc: dict[str, Any], uri: str, sha: str, results: str | None, run_id: str | None) -> None:
+def apply_bundle(doc: dict[str, Any], uri: str, sha: str, results: str | None, run_id: str | None,
+                 extra_ingress: list[str] | None = None) -> None:
     """Rewrite every job to run the repo code from a checksum-verified bundle on the stock image."""
     if not FB_URI.match(uri) or not uri.endswith(".tar.gz"):
         raise RenderError("--bundle must be an fb://... .tar.gz object URI")
@@ -170,6 +176,11 @@ def apply_bundle(doc: dict[str, Any], uri: str, sha: str, results: str | None, r
     code = f"/data/pravah_code/{sha[:16]}"
     transfer = {"use": "ephemeral", "size": "2GiB",
                 "ingress": [{"source": {"uri": uri}, "destination": {"uri": "file://in/bundle.tar.gz"}}]}
+    for item in extra_ingress or []:  # fb://...=name  ->  /transfer/in/name
+        src, _, name = item.partition("=")
+        if not FB_URI.match(src) or not re.match(r"^[A-Za-z0-9_.-]+$", name or ""):
+            raise RenderError("--ingress must be fb://...=<file name>")
+        transfer["ingress"].append({"source": {"uri": src}, "destination": {"uri": f"file://in/{name}"}})
     boot = "\n".join([
         "#!/bin/sh", "set -eu", f"CODE={code}",
         'if [ "$(cat "$CODE/.bundle_sha256" 2>/dev/null)" != "' + sha + '" ]; then',
@@ -220,6 +231,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--bundle", default=None, help="fb://.../bundle.tar.gz: run on the stock NVIDIA image from this code bundle")
     p.add_argument("--bundle-sha256", default=None, help="SHA-256 of the bundle (required with --bundle)")
     p.add_argument("--results-prefix", default=None, help="fb://... prefix that training jobs egress their run folder to")
+    p.add_argument("--ingress", action="append", default=[], metavar="fb://...=NAME",
+                   help="Extra object staged to /transfer/in/NAME in bundle mode (e.g. a checkpoint)")
     args = p.parse_args(argv)
     try:
         values = dict(kv.split("=", 1) for kv in args.set)
@@ -236,7 +249,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.bundle:
             if not args.bundle_sha256:
                 raise RenderError("--bundle requires --bundle-sha256")
-            apply_bundle(doc, args.bundle, args.bundle_sha256, args.results_prefix, values.get("RUN_ID"))
+            apply_bundle(doc, args.bundle, args.bundle_sha256, args.results_prefix, values.get("RUN_ID"),
+                         args.ingress)
         notes = validate(doc)
     except (RenderError, ValueError, yaml.YAMLError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
