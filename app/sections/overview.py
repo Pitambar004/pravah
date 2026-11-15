@@ -14,7 +14,7 @@ from app.components.layout import (
 from app.components.map_view import build_layers, render_map_workspace
 from app.components.metric_card import render_metric_card
 from app.components.timeline import build_timeline_svg, timeline_legend
-from app.context import CASE_STUDY, AppContext, render_page_frame
+from app.context import AppContext, render_page_frame
 from pravah.replay.eligibility import classify_asset
 
 OVERVIEW_CUTOFF = "2026-08-26T11:00:00+05:45"
@@ -53,14 +53,14 @@ def render_overview_section(ctx: AppContext) -> None:
         ctx,
         "Overview",
         "Flood Intelligence Overview",
-        "Satellite-derived evidence, infrastructure exposure, and historical analysis for Nepal’s mountain river corridors.",
+        "Real satellite water segmentation, mapped infrastructure intersections and source provenance.",
     )
 
     bar_l, bar_r = st.columns([3, 2], vertical_alignment="bottom")
     with bar_l:
         st.selectbox(
             "Case study",
-            [f"{CASE_STUDY['region']} · {CASE_STUDY['corridor']} · {CASE_STUDY['event_date']}"],
+            [f"{ctx.study['region']} · {ctx.study['corridor']} · {ctx.study['event_date']}"],
             help="Only one case study is configured in this prototype.",
             key="pv_case_study",
         )
@@ -75,8 +75,8 @@ def render_overview_section(ctx: AppContext) -> None:
 
     cols = st.columns(4)
     specs = [
-        {"label": "Satellite observations", "icon_name": "satellite_alt", "value": len(sats) if ctx.catalog else None,
-             "unit": "scenes", "empty_label": "No manifest",
+        {"label": "Satellite catalog records", "icon_name": "satellite_alt", "value": len(sats) if ctx.catalog else None,
+             "unit": "records", "empty_label": "No manifest",
              "subtext": ("Synthetic fixture catalog" if ctx.catalog_is_synthetic else (ctx.catalog_source or "Awaiting data/manifests/assets.json"))},
         {"label": "Mapped water extent", "icon_name": "water", "value": (water / 10_000) if water is not None else None,
              "unit": "ha", "empty_label": "Awaiting processing", "subtext": ctx.source_note("exposure_summary.json") if water is not None else "Requires stitched mask"},
@@ -94,7 +94,7 @@ def render_overview_section(ctx: AppContext) -> None:
 
     col_map, col_side = st.columns([2, 1])
     with col_map:
-        render_section_header("Study area", f"{CASE_STUDY['corridor']} · mapped evidence and analysis boundary")
+        render_section_header("Image coverage", f"{ctx.study['region']} · {ctx.study['corridor']}")
         render_map_workspace(build_layers(a), height=460, mode="preview", synthetic=a.is_synthetic)
     with col_side:
         render_section_header("Processing status", "Artifacts present for the selected run")
@@ -102,15 +102,16 @@ def render_overview_section(ctx: AppContext) -> None:
 
     render_section_header(
         "Evidence availability",
-        "All catalogued observations, including later evidence. Use Historical Replay for strict cutoff views.",
+        "Nepal catalog records include metadata-only entries. Use Historical Replay to inspect download and availability status.",
     )
     if ctx.catalog:
         assets = [{**c, "_status": classify_asset(c, OVERVIEW_CUTOFF)} for c in ctx.catalog]
         html(
             '<div class="pv-timeline"><div class="pv-timeline-scroll">'
-            + build_timeline_svg(assets, OVERVIEW_CUTOFF, strict=False)
+            + build_timeline_svg(assets[:20], OVERVIEW_CUTOFF, strict=False)
             + "</div>" + timeline_legend(strict=False) + "</div>"
         )
+        st.caption(f"Previewing {min(20, len(assets))} of {len(assets)} catalog records. Catalog entries are not downloaded images.")
         st.page_link("views/replay.py", label="Open historical replay", icon=":material/arrow_forward:")
     else:
         render_empty_state(

@@ -10,12 +10,15 @@ without an artifact are still listed but disabled, with the reason shown.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict, dataclass, field
 from typing import Any
+from urllib.parse import quote
 
 import streamlit as st
 
 from app.theme import FONT_MONO, FONT_SANS, TOKENS
+from pravah.configuration import configured_url
 
 RASUWA_CENTER = [28.150, 85.350]
 LEAFLET_VERSION = "1.9.4"
@@ -28,32 +31,50 @@ KIND_LABELS = {
     "observed": "Observed",
     "model": "Model-derived",
     "derived": "Derived exposure",
-    "scenario": "Hypothetical scenario",
+    "scenario": "Exploratory scenario",
     "reference": "Retrospective reference",
 }
 
 BASEMAPS = {
     "dark": {
         "label": "Dark",
-        "url": "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+        "url": configured_url("PRAVAH_BASEMAP_DARK_URL"),
+        "label_url": configured_url("PRAVAH_BASEMAP_LABELS_URL"),
         "attr": "Esri, HERE, Garmin, &copy; OpenStreetMap contributors",
     },
     "light": {
         "label": "Light",
-        "url": "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+        "url": configured_url("PRAVAH_BASEMAP_LIGHT_URL"),
         "attr": "Esri, HERE, Garmin, &copy; OpenStreetMap contributors",
     },
     "imagery": {
         "label": "Imagery",
-        "url": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        "url": configured_url("PRAVAH_BASEMAP_IMAGERY_URL"),
         "attr": "Esri World Imagery (basemap only — not PRAVAH evidence)",
     },
     "terrain": {
         "label": "Terrain",
-        "url": "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+        "url": configured_url("PRAVAH_BASEMAP_TERRAIN_URL"),
         "attr": "&copy; OpenStreetMap contributors, SRTM | OpenTopoMap (CC-BY-SA)",
     },
 }
+
+
+def configured_basemaps():
+    """Bind the local/environment basemap credential only at render time."""
+    key = os.environ.get("PRAVAH_CARTO_BASEMAP_API_KEY")
+    if not key:
+        try:
+            key = st.secrets.get("PRAVAH_CARTO_BASEMAP_API_KEY")
+        except (FileNotFoundError, KeyError):
+            key = None
+    maps = {name: dict(value) for name, value in BASEMAPS.items()}
+    if key:
+        for name, style in [("dark", "dark_all"), ("light", "light_all")]:
+            maps[name] = {"label": BASEMAPS[name]["label"],
+                          "url": configured_url("PRAVAH_CARTO_TILE_URL").replace("{style}", style) + "?key=" + quote(str(key), safe=""),
+                          "attr": "&copy; OpenStreetMap contributors &copy; CARTO"}
+    return maps
 
 
 @dataclass
@@ -77,7 +98,7 @@ class MapLayer:
 
     @property
     def available(self) -> bool:
-        return bool(self.data and self.data.get("features"))
+        return bool(self.extra.get("image_url")) or (isinstance(self.data, dict) and "features" in self.data)
 
 
 def _round_coords(obj: Any, ndigits: int = 6) -> Any:
@@ -170,14 +191,14 @@ def build_layers(artifacts: Any, show_retrospective: bool = True) -> list[MapLay
     meta = artifacts.observed_metadata or {}
     layers = [
         MapLayer(
-            id="aoi", name="Study area (AOI)", group="Geographic context", kind="context",
+            id="aoi", name="Image footprint / study boundary", group="Geographic context", kind="context",
             color=TOKENS["text_secondary"], data=_slim_geojson(artifacts.aoi_geojson), fill=False, dash="6 4",
-            opacity=0.9, source="config/aois/" + fixture, description="Bounded analysis corridor for the Bhote Koshi–Trishuli valleys.",
-            limitation="Pixels outside the AOI or occluded by cloud are invalid (class 255), never 'no water'.",
+            opacity=0.9, source="Run footprint or supplied study boundary" + fixture, description="Image coverage is distinct from an authoritative affected extent.",
+            limitation="Source nodata is invalid (255). Reference cloud masks restrict scoring; unmasked-cloud predictions are unvalidated.",
             unavailable_reason="No AOI GeoJSON in config/aois/",
         ),
         _context_layer(artifacts, "admin_boundaries", "admin", "Administrative boundaries", TOKENS["text_muted"]),
-        _context_layer(artifacts, "rivers", "rivers", "River network", TOKENS["text_secondary"]),
+        _context_layer(artifacts, "rivers", "rivers", "River network", TOKENS["map_water"]),
         MapLayer(
             id="water", name="Model-derived water extent", group="Satellite evidence", kind="model",
             color=TOKENS["map_water"], data=_slim_geojson(artifacts.water_geojson), opacity=0.55,
@@ -189,15 +210,16 @@ def build_layers(artifacts: Any, show_retrospective: bool = True) -> list[MapLay
             unavailable_reason="No stitched water polygons (exposure.geojson / polygons.geojson)",
         ),
         MapLayer(id="imagery", name="Sentinel-2 scene preview", group="Satellite evidence", kind="observed",
-                 color=TOKENS["accent"], unavailable_reason="No preview tiles generated (GeoTIFFs are not loaded in-browser)"),
+                 color=TOKENS["accent"], opacity=0.9,
+                 extra={"image_url": (meta.get("scene_preview") or {}).get("data_url"),
+                        "bounds": (meta.get("scene_preview") or {}).get("bounds")},
+                 source=meta.get("source_raster", "—"), unavailable_reason="No source preview exported"),
         *_change_layers(artifacts),
         *_exposure_layers(artifacts, fixture),
-        MapLayer(id="susceptibility", name="Terrain susceptibility", group="Scenarios", kind="scenario",
-                 color=TOKENS["map_scenario"], unavailable_reason="No scenario model has been run"),
-        MapLayer(id="inundation", name="Hypothetical inundation", group="Scenarios", kind="scenario",
-                 color=TOKENS["map_scenario"], unavailable_reason="No scenario model has been run"),
     ]
-    if show_retrospective:
+    if (meta.get("case_study") or {}).get("scope") == "benchmark":
+        layers = [layer for layer in layers if layer.id != "admin" or layer.available]
+    if show_retrospective and (meta.get("case_study") or {}).get("scope") != "benchmark":
         unosat = artifacts.unosat_geojson
         props = (unosat or {}).get("features", [{}])[0].get("properties", {}) if unosat else {}
         layers.append(
@@ -229,6 +251,7 @@ def build_map_html(
     mode: str = "full",
     synthetic: bool = False,
     initial_basemap: str = "dark",
+    initial_bounds: list[list[float]] | None = None,
 ) -> str:
     """Return the full HTML document for the map workspace.
 
@@ -238,18 +261,24 @@ def build_map_html(
     config = {
         "layers": _payload(layers),
         "groups": GROUP_ORDER,
-        "basemaps": BASEMAPS,
+        "basemaps": configured_basemaps(),
         "basemap": initial_basemap if initial_basemap in BASEMAPS else "dark",
         "mode": mode,
         "synthetic": synthetic,
         "center": RASUWA_CENTER,
         "zoom": 11,
+        "initialBounds": initial_bounds,
+        "review": next((layer.extra["review"] for layer in layers if layer.extra.get("review")), None),
+        "focus": next((layer.extra["focus"] for layer in layers if layer.extra.get("focus")), None),
     }
     data_json = json.dumps(config, separators=(",", ":")).replace("</", "<\\/")
     tokens = {f"--{k.replace('_', '-')}": v for k, v in TOKENS.items()}
     css_vars = ";".join(f"{k}:{v}" for k, v in tokens.items())
     return (
-        _TEMPLATE.replace("%LEAFLET%", LEAFLET_VERSION)
+        _TEMPLATE.replace("%LEAFLET_CSS%", configured_url("PRAVAH_LEAFLET_CSS_URL", version=LEAFLET_VERSION))
+        .replace("%LEAFLET_JS%", configured_url("PRAVAH_LEAFLET_JS_URL", version=LEAFLET_VERSION))
+        .replace("%FONT_CSS%", configured_url("PRAVAH_FONT_CSS_URL"))
+        .replace("%ICONS_CSS%", configured_url("PRAVAH_ICONS_CSS_URL"))
         .replace("%CSSVARS%", css_vars)
         .replace("%FONT%", FONT_SANS)
         .replace("%MONO%", FONT_MONO)
@@ -262,9 +291,11 @@ def render_map_workspace(
     height: int = 680,
     mode: str = "full",
     synthetic: bool = False,
+    initial_bounds: list[list[float]] | None = None,
 ) -> None:
     """Render the map workspace iframe."""
-    st.components.v1.html(build_map_html(layers, mode=mode, synthetic=synthetic), height=height)
+    st.components.v1.html(build_map_html(layers, mode=mode, synthetic=synthetic,
+                                        initial_bounds=initial_bounds), height=height)
 
 
 # Back-compat helper used by earlier sections/tests.
@@ -277,10 +308,10 @@ def render_flood_map(artifacts: Any, height: int = 440, mode: str = "preview", s
 
 _TEMPLATE = r"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@%LEAFLET%/dist/leaflet.css">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,300..500,0,0&display=block">
-<script src="https://unpkg.com/leaflet@%LEAFLET%/dist/leaflet.js"></script>
+<link rel="stylesheet" href="%LEAFLET_CSS%">
+<link rel="stylesheet" href="%FONT_CSS%">
+<link rel="stylesheet" href="%ICONS_CSS%">
+<script src="%LEAFLET_JS%"></script>
 <style>
 :root{%CSSVARS%;--font:%FONT%;--mono:%MONO%}
 *{box-sizing:border-box}
@@ -321,7 +352,7 @@ html,body{margin:0;height:100%;background:var(--bg-app);color:var(--text);font:1
 .bm button{height:28px;border-radius:7px;border:1px solid var(--border-subtle);background:var(--surface);color:var(--text-secondary);font:500 11.5px var(--font);cursor:pointer}
 .bm button[aria-pressed=true]{background:rgba(56,189,248,.1);color:var(--accent);border-color:rgba(56,189,248,.4)}
 /* Toolbar */
-#tools{top:12px;right:12px;display:flex;flex-direction:column;gap:6px;z-index:600;transition:right .18s cubic-bezier(.2,0,0,1)}
+#tools{top:12px;right:12px;display:flex;gap:6px;z-index:600;transition:right .18s cubic-bezier(.2,0,0,1)}
 body.detail-open #tools{right:336px}
 #openLayers{position:absolute;top:12px;left:12px;z-index:600;display:none}
 #layers.closed ~ #openLayers{display:inline-flex}
@@ -347,6 +378,20 @@ body.layers-open #legend{left:304px}
 #empty{left:50%;top:50%;transform:translate(-50%,-50%);padding:16px 18px;max-width:320px;text-align:center;color:var(--text-secondary);display:none}
 #fixture{left:50%;top:12px;transform:translateX(-50%);padding:5px 10px;font-size:11.5px;color:var(--warning);border-color:rgba(251,191,36,.35);display:none;white-space:nowrap}
 #coords{right:56px;bottom:10px;padding:2px 8px;border-radius:6px;font:11px/18px var(--mono);color:var(--text-muted)}
+#imageReview{right:12px;bottom:28px;width:245px;padding:12px;display:none}
+#imageReview h3{font-size:12px;margin:0 0 5px}
+#imageReview p{font-size:11px;color:var(--text-secondary);margin:5px 0 9px}
+body.has-review .leaflet-bottom.leaflet-right{bottom:148px}
+body.has-review #coords{display:none}
+#imageDialog{max-width:min(850px,95vw);width:95%;max-height:calc(100vh - 24px);overflow:auto;border:1px solid var(--border);border-radius:14px;background:var(--bg-app);color:var(--text);padding:14px;box-shadow:0 12px 40px #0008}
+#imageDialog::backdrop{background:#030913bb;backdrop-filter:blur(3px)}
+.comparison-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
+.comparison-grid img{width:100%;height:clamp(120px,38vh,245px);object-fit:contain;background:#050910;border-radius:8px}
+.comparison-grid h4{margin:0 0 5px;font-size:12px}
+.comparison-grid small{display:block;color:var(--text-secondary);font-size:10px;word-break:break-word}
+.focus-pulse{width:24px;height:24px;border-radius:50%;background:#fb7185;border:2px solid #fff;box-shadow:0 0 0 0 #fb718580;animation:focus-wave 1.5s infinite}
+@keyframes focus-wave{70%{box-shadow:0 0 0 30px #fb718500}100%{box-shadow:0 0 0 0 #fb718500}}
+@media(prefers-reduced-motion:reduce){.focus-pulse{animation:none}}
 .leaflet-control-zoom{border:1px solid var(--border)!important;border-radius:8px!important;overflow:hidden}
 .leaflet-control-zoom a{background:rgba(23,35,53,.96)!important;color:var(--text-secondary)!important;border-bottom:1px solid var(--border)!important;width:32px!important;height:32px!important;line-height:30px!important}
 .leaflet-control-zoom a:hover{background:var(--surface-hover)!important;color:var(--text)!important}
@@ -369,7 +414,7 @@ body.preview #legend{left:12px!important;bottom:12px}
 </style></head>
 <body>
 <div id="map" role="application" aria-label="Flood evidence map"></div>
-<section id="layers" class="panel" aria-label="Map layers">
+<section id="layers" class="panel closed" aria-label="Map layers">
   <div class="ph"><h2>Layers</h2><button class="btn" id="closeLayers" title="Hide layer panel" aria-label="Hide layer panel"><span class="ico">left_panel_close</span></button></div>
   <div class="pbody" id="layerBody"></div>
 </section>
@@ -387,12 +432,14 @@ body.preview #legend{left:12px!important;bottom:12px}
 <div id="empty" class="panel" role="status"></div>
 <div id="fixture" class="panel" role="status">Synthetic fixture — not real observations</div>
 <div id="coords" class="panel" aria-hidden="true">—</div>
+<section id="imageReview" class="panel" aria-label="Satellite change review"><h3>Satellite change review</h3><p id="reviewStatus"></p><button class="btn" id="inspectImages">Inspect before / current</button></section>
+<dialog id="imageDialog" aria-label="Satellite image comparison"><div class="ph"><h2 id="comparisonTitle">Satellite comparison</h2><button class="btn" id="closeComparison" aria-label="Close image comparison">Close</button></div><div class="comparison-grid"><div><h4>Before</h4><img id="beforeImage" alt="Actual earlier satellite acquisition"><small id="beforeStamp"></small></div><div><h4>Current · visual changes highlighted</h4><img id="currentImage" alt="Actual later satellite acquisition with appearance differences highlighted"><small id="currentStamp"></small></div></div><p id="comparisonNote"></p><button class="btn" id="toggleComparison">Show original current image</button></dialog>
 <script>
 const CFG = %CONFIG%;
 const $ = (id) => document.getElementById(id);
 const el = (tag, attrs = {}, text) => { const e = document.createElement(tag); for (const [k, v] of Object.entries(attrs)) { if (k === 'class') e.className = v; else e.setAttribute(k, v); } if (text !== undefined) e.textContent = text; return e; };
 const preview = CFG.mode === 'preview';
-if (preview) document.body.classList.add('preview'); else document.body.classList.add('layers-open');
+if (preview) document.body.classList.add('preview');
 if (CFG.synthetic) $('fixture').style.display = 'block';
 if (preview) { ['resetView'].forEach(id => $(id).style.display = 'none'); }
 
@@ -402,18 +449,24 @@ L.control.zoom({ position: 'bottomright' }).addTo(map);
 L.control.scale({ position: 'bottomright', imperial: false }).addTo(map);
 
 let baseLayer = null;
+let labelsLayer = null;
 function setBasemap(key) {
   const b = CFG.basemaps[key]; if (!b) return;
   if (baseLayer) map.removeLayer(baseLayer);
+  if (labelsLayer) { map.removeLayer(labelsLayer); labelsLayer = null; }
   baseLayer = L.tileLayer(b.url, { attribution: b.attr, subdomains: 'abc', maxZoom: 16 }).addTo(map);
   baseLayer.bringToBack();
+  if (b.label_url) {
+    if (!map.getPane('basemapLabels')) { map.createPane('basemapLabels'); map.getPane('basemapLabels').style.zIndex = 450; map.getPane('basemapLabels').style.pointerEvents = 'none'; }
+    labelsLayer = L.tileLayer(b.label_url, {pane: 'basemapLabels', maxZoom: 16}).addTo(map);
+  }
   document.querySelectorAll('.bm button').forEach(btn => btn.setAttribute('aria-pressed', btn.dataset.key === key));
 }
 
 const state = {};
 let selected = null;
 function styleFor(spec, s) {
-  return { color: spec.color, weight: spec.fill ? 1.25 : 2, opacity: Math.min(1, s.opacity + 0.35), dashArray: spec.dash || null,
+  return { color: spec.color, weight: spec.extra?.weight ?? (spec.fill ? 1.25 : 2), opacity: Math.min(1, s.opacity + 0.35), dashArray: spec.dash || null,
            fillColor: spec.color, fillOpacity: spec.fill ? s.opacity : 0 };
 }
 function fmt(v) {
@@ -459,11 +512,19 @@ CFG.layers.forEach(spec => {
   const s = { on: spec.available && spec.visible, opacity: spec.opacity, layer: null };
   state[spec.id] = s;
   if (!spec.available) return;
+  if (spec.extra && spec.extra.image_url) {
+    if (!map.getPane('scenePreview')) { map.createPane('scenePreview'); map.getPane('scenePreview').style.zIndex = 350; }
+    s.layer = L.imageOverlay(spec.extra.image_url, spec.extra.bounds, {opacity: s.opacity, pane: 'scenePreview'});
+    if (s.on) { s.layer.addTo(map); s.layer.bringToBack(); }
+    return;
+  }
   s.layer = L.geoJSON(spec.data, {
+    pointToLayer: (feature, latlng) => L.circleMarker(latlng, {radius: spec.extra?.radius ?? 4, ...styleFor(spec, s)}),
     style: () => styleFor(spec, s),
     onEachFeature: (f, lyr) => {
       const p = f.properties || {};
-      lyr.bindTooltip(String(p.label || p.name || spec.name), { className: 'pv', sticky: true, direction: 'top' });
+      const tip = document.createElement('span'); tip.textContent = String(p.label || p.name || spec.name);
+      lyr.bindTooltip(tip, { className: 'pv', sticky: true, direction: 'top' });
       if (!preview) lyr.on('click', (ev) => {
         L.DomEvent.stopPropagation(ev);
         if (selected) selected.layer.setStyle(styleFor(selected.spec, state[selected.spec.id]));
@@ -508,13 +569,13 @@ function renderPanel() {
         const op = el('div', { class: 'opacity' });
         op.append(el('span', {}, 'Opacity'));
         const rng = el('input', { type: 'range', min: '0', max: '100', value: String(Math.round(s.opacity * 100)), 'aria-label': spec.name + ' opacity' });
-        rng.oninput = () => { s.opacity = rng.value / 100; s.layer.setStyle(styleFor(spec, s)); };
+        rng.oninput = () => { s.opacity = rng.value / 100; if (spec.extra && spec.extra.image_url) s.layer.setOpacity(s.opacity); else s.layer.setStyle(styleFor(spec, s)); };
         op.append(rng); op.hidden = !s.on; row.append(op);
         cb.addEventListener('change', () => { op.hidden = !cb.checked; });
       }
       cb.addEventListener('change', () => {
         s.on = cb.checked;
-        if (s.on) s.layer.addTo(map); else { map.removeLayer(s.layer); if (selected && selected.spec.id === spec.id) closeDetail(); }
+        if (s.on) { s.layer.addTo(map); if (spec.extra && spec.extra.image_url) s.layer.bringToBack(); } else { map.removeLayer(s.layer); if (selected && selected.spec.id === spec.id) closeDetail(); }
         renderLegend(); updateEmpty();
       });
       body.append(row);
@@ -525,12 +586,16 @@ function renderLegend() {
   const body = $('legendBody'); body.replaceChildren();
   const on = CFG.layers.filter(l => state[l.id].on);
   if (!on.length) { body.append(el('div', { class: 'lg' }, 'No layers visible')); return; }
+  const seen = new Set();
   on.forEach(l => {
+    const label = l.extra?.legend_label || l.name;
+    if (seen.has(label)) return;
+    seen.add(label);
     const row = el('div', { class: 'lg' });
     const sw = el('i');
     sw.style.background = l.fill ? l.color + '88' : 'transparent';
     sw.style.border = '1.5px ' + (l.dash ? 'dashed ' : 'solid ') + l.color;
-    row.append(sw, document.createTextNode(l.name + (l.kind === 'reference' ? ' (post-event)' : '')));
+    row.append(sw, document.createTextNode(label + (l.kind === 'reference' ? ' (post-event)' : '')));
     body.append(row);
   });
 }
@@ -554,7 +619,11 @@ function fitAoi(animate) {
   else map.setView(CFG.center, CFG.zoom, { animate });
 }
 $('fitAoi').onclick = () => fitAoi(true);
-$('resetView').onclick = () => { closeDetail(); fitAoi(true); };
+function fitInitial(animate) {
+  if (CFG.initialBounds) map.fitBounds(CFG.initialBounds, {padding: [30, 30], animate});
+  else fitAoi(animate);
+}
+$('resetView').onclick = () => { closeDetail(); fitInitial(true); };
 $('toggleLegend').onclick = (e) => { const lg = $('legend'); const show = lg.style.display === 'none'; lg.style.display = show ? '' : 'none'; e.currentTarget.setAttribute('aria-pressed', show); };
 $('closeLayers').onclick = () => { $('layers').classList.add('closed'); document.body.classList.remove('layers-open'); $('openLayers').focus(); };
 $('openLayers').onclick = () => { $('layers').classList.remove('closed'); document.body.classList.add('layers-open'); };
@@ -562,6 +631,34 @@ if (!preview && window.innerWidth <= 720) { $('layers').classList.add('closed');
 map.on('mousemove', e => { $('coords').textContent = e.latlng.lat.toFixed(4) + '°N  ' + e.latlng.lng.toFixed(4) + '°E'; });
 
 setBasemap(CFG.basemap);
-renderPanel(); renderLegend(); updateEmpty(); fitAoi(false);
+renderPanel(); renderLegend(); updateEmpty(); fitInitial(false);
+if(CFG.review){
+  const pair=CFG.review.pair, summary=pair.summary || {};
+  document.body.classList.add('has-review'); $('imageReview').style.display='block';
+  $('reviewStatus').textContent=summary.cloud_limited ? 'Cloud-limited pair · inspect changes' : summary.review_recommended ? 'Appearance changes · review suggested' : 'No major preview appearance change';
+  const stamp=row => new Date(row.acquired_at_utc).toLocaleString('en-GB',{timeZone:'Asia/Kathmandu'})+' NPT';
+  $('comparisonTitle').textContent=CFG.review.title || pair.label;
+  $('beforeImage').src=pair.before.preview_data_url;
+  $('currentImage').src=pair.overlay_data_url || pair.current.preview_data_url;
+  $('beforeStamp').textContent=stamp(pair.before)+' · '+pair.before.scene_id;
+  $('currentStamp').textContent=stamp(pair.current)+' · '+pair.current.scene_id;
+  $('comparisonNote').textContent=CFG.review.note || 'Red highlights visual appearance differences. Clouds, snow, shadows and alignment can cause differences; these previews do not measure glacier displacement, lake depth or flood damage.';
+  $('inspectImages').onclick=()=>{$('imageDialog').showModal();};
+  $('closeComparison').onclick=()=>{$('imageDialog').close();};
+  let highlighted=true;
+  $('toggleComparison').onclick=()=>{highlighted=!highlighted;$('currentImage').src=highlighted ? pair.overlay_data_url : pair.current.preview_data_url; $('toggleComparison').textContent=highlighted ? 'Show original current image' : 'Highlight visual differences';};
+  if(CFG.review.auto_open) setTimeout(()=>{$('imageDialog').showModal();},600);
+}
+if(CFG.focus){
+  const f=CFG.focus;
+  const marker=L.marker(f.coordinates,{icon:L.divIcon({className:'',html:'<div class="focus-pulse"></div>',iconSize:[24,24],iconAnchor:[12,12]})}).addTo(map);
+  const popup=el('div'); popup.append(el('b',{},f.title),el('p',{},f.description || ''),el('small',{},f.last_reading || ''));
+  marker.bindPopup(popup,{maxWidth:250});
+  setTimeout(()=>{map.flyTo(f.coordinates,f.zoom || 12,{duration:1.5});marker.openPopup();},450);
+  if(f.lock_seconds){
+    map.dragging.disable();map.scrollWheelZoom.disable();map.doubleClickZoom.disable();
+    setTimeout(()=>{map.dragging.enable();map.scrollWheelZoom.enable();map.doubleClickZoom.enable();},f.lock_seconds*1000);
+  }
+}
 </script></body></html>
 """

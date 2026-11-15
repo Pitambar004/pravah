@@ -85,14 +85,16 @@ def render_replay_section(ctx: AppContext) -> None:
     if not ctx.catalog:
         render_empty_state(
             "No source manifest available",
-            "Replay needs an audited asset manifest with acquisition and verified availability timestamps. "
-            "Enable synthetic fixtures in the sidebar to preview this page.",
+            "Replay needs an audited asset manifest with acquisition and verified availability timestamps.",
             expected_files=["data/manifests/assets.json"],
             icon_name="history",
         )
         return
 
     groups = partition(ctx.catalog, cutoff)
+    catalog_only = sum(x.get("download_status") == "catalog_only" for x in ctx.catalog)
+    if catalog_only:
+        st.info(f"{catalog_only} records contain catalog metadata only. Their imagery is not downloaded and historical availability is unverified.")
     eligible = groups["known_before_cutoff"]
     later = groups["retrospective_reveal"]
     excluded_all = groups["excluded_unknown_availability"]
@@ -129,14 +131,16 @@ def render_replay_section(ctx: AppContext) -> None:
     shown = eligible + excluded + ([] if strict else later)
     html(
         '<div class="pv-timeline"><div class="pv-timeline-scroll">'
-        + build_timeline_svg(shown, cutoff, strict=strict)
+        + build_timeline_svg(shown[:30], cutoff, strict=strict)
         + "</div>" + timeline_legend(strict) + "</div>"
     )
 
     def cards(title: str, desc: str, items: list[dict], empty: str) -> None:
         render_section_header(f"{title} · {len(items)}", desc)
         if items:
-            html('<div class="pv-evidence-list">' + "".join(evidence_card(i) for i in items) + "</div>")
+            html('<div class="pv-evidence-list">' + "".join(evidence_card(i) for i in items[:30]) + "</div>")
+            if len(items) > 30:
+                st.caption(f"Showing 30 of {len(items)} records; full metadata is in the manifest table below.")
         else:
             render_empty_state(empty, "", badge=None, icon_name="inbox", compact=True)
 

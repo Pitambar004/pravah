@@ -14,6 +14,7 @@ PAGES = [
     "views/replay.py",
     "views/exposure.py",
     "views/inference.py",
+    "views/environment.py",
     "views/compute.py",
     "views/methodology.py",
 ]
@@ -29,6 +30,9 @@ def _isolated_data(monkeypatch, tmp_path):
     monkeypatch.setenv("PRAVAH_OUTPUTS_DIR", str(empty))
     monkeypatch.setenv("PRAVAH_API_URL", "http://127.0.0.1:9")
     monkeypatch.setenv("PRAVAH_CONTEXT_DIR", str(tmp_path / "context"))
+    monkeypatch.setenv("PRAVAH_USER_CONTEXT_DIR", str(tmp_path / "user_context"))
+    monkeypatch.setenv("PRAVAH_ENABLE_TEST_FIXTURES", "1")
+    monkeypatch.delenv("PRAVAH_REPLAY_MANIFEST", raising=False)
     monkeypatch.delenv("PRAVAH_RUN_SOURCE", raising=False)
     st.cache_data.clear()
     yield
@@ -38,9 +42,8 @@ def _isolated_data(monkeypatch, tmp_path):
 def _app(page: str, demo: bool) -> AppTest:
     at = AppTest.from_file(str(HOME_PATH), default_timeout=30)
     at.run()
-    if not demo:
-        at.sidebar.toggle[0].set_value(False)
-        at.run()
+    at.sidebar.toggle[0].set_value(demo)
+    at.run()
     at.switch_page(page)
     at.run()
     return at
@@ -147,7 +150,7 @@ def test_map_uses_api_runs_when_no_local_runs(monkeypatch, tmp_path):
     monkeypatch.setattr(api_client, "run_metadata", lambda r: ({"run_id": r, "threshold": 0.5}, None))
     monkeypatch.setattr(api_client, "run_json_file", lambda r, n: (geo, None))
     st.cache_data.clear()
-    at = _app("views/flood_map.py", demo=True)  # demo flag unused: fixtures default off with remote runs
+    at = _app("views/flood_map.py", demo=False)
     assert not at.exception, at.exception
     text = _text(at)
     assert "TEST_REMOTE_RUN" in text and "Run artifacts loaded" in text

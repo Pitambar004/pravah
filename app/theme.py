@@ -4,6 +4,7 @@ All colours, radii, spacing and type sizes used anywhere in the app come from
 ``TOKENS``. Python components reference ``TOKENS`` (for inline SVG / map styles);
 CSS references the same values through custom properties generated below.
 """
+from pravah.configuration import configured_url
 
 TOKENS: dict[str, str] = {
     # Surfaces
@@ -44,8 +45,8 @@ def _css_vars() -> str:
 
 DESIGN_SYSTEM_CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,300..500,0,0&display=block');
+@import url('%FONT_CSS%');
+@import url('%ICONS_CSS%');
 
 :root {
 %VARS%
@@ -402,6 +403,9 @@ div[data-baseweb="tab-border"] { display: none; }
 [data-testid="stTooltipIcon"] svg { color: var(--pv-text-disabled) !important; }
 
 /* Map iframe */
+[data-testid="stMetric"] { min-height: 108px; }
+[data-testid="stMetricValue"] { font-size: 26px; letter-spacing: -0.02em; }
+[data-testid="stDataFrame"] { width: 100% !important; }
 iframe[title="st.iframe"], [data-testid="stIFrame"], .stCustomComponentV1 {
   border: 1px solid var(--pv-border-subtle) !important; border-radius: var(--pv-r-md); background: var(--pv-surface);
 }
@@ -418,7 +422,7 @@ hr { border: 0 !important; border-top: 1px solid var(--pv-border-subtle) !import
 .pv-footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--pv-border-subtle);
   display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 12px; line-height: 18px; color: var(--pv-text-disabled); }
 </style>
-""".replace("%VARS%", _css_vars()).replace("%FONT_SANS%", FONT_SANS).replace("%FONT_MONO%", FONT_MONO)
+""".replace("%VARS%", _css_vars()).replace("%FONT_SANS%", FONT_SANS).replace("%FONT_MONO%", FONT_MONO).replace("%FONT_CSS%", configured_url("PRAVAH_FONT_CSS_URL")).replace("%ICONS_CSS%", configured_url("PRAVAH_ICONS_CSS_URL"))
 
 
 def apply_theme() -> None:

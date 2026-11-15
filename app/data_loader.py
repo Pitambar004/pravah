@@ -217,7 +217,8 @@ def load_run_artifacts(
     # Study-area context layers (rivers, admin boundaries); cleared below in fixture mode
     context_dir = Path(os.environ.get("PRAVAH_CONTEXT_DIR", "data/processed/context"))
     for name in CONTEXT_LAYER_FILES:
-        geo, gerr = safe_read_geojson(context_dir / f"{name}.geojson")
+        local_context = path / f"{name}.geojson"
+        geo, gerr = safe_read_geojson(local_context if local_context.exists() else context_dir / f"{name}.geojson")
         if geo:
             artifacts.context_layers[name] = geo
         elif gerr:
@@ -225,6 +226,7 @@ def load_run_artifacts(
 
     # Check for core AOI in config/
     aoi_candidates = [
+        path / "image_footprint.geojson",
         Path("config/aois/aoi_core.geojson"),
         Path("config/aois/analysis_coverage.geojson"),
         Path("config/aoi_core.geojson")
@@ -268,6 +270,8 @@ def load_replay_catalog_with_source(
     fixture scenes as real observations without labelling them.
     """
     paths_to_check = []
+    if os.environ.get("PRAVAH_REPLAY_MANIFEST"):
+        paths_to_check.append(Path(os.environ["PRAVAH_REPLAY_MANIFEST"]))
     if manifest_path:
         paths_to_check.append(Path(manifest_path))
     paths_to_check.extend([
@@ -291,7 +295,7 @@ def load_replay_catalog_with_source(
                         "platform": props.get("platform", "Sentinel-2"),
                         "product_type": props.get("constellation", "optical"),
                         "acquired_at_utc": props.get("datetime") or props.get("start_datetime"),
-                        "available_at_utc": props.get("published") or props.get("created"),
+                        "available_at_utc": props.get("verified_available_at_utc"),
                         "cloud_cover_percent": props.get("eo:cloud_cover"),
                         "provider": "Copernicus STAC",
                         "description": f.get("id")
