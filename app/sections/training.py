@@ -21,7 +21,7 @@ from app.components.layout import (
 )
 from app.components.metric_card import render_metric_card
 from app.context import AppContext, render_page_frame
-from app.runs import training_dir, training_runs
+from app.runs import local_models_dir, models_dir, training_dir, training_runs
 from app.theme import TOKENS
 
 # Validated dark-mode categorical slots (dataviz reference palette; checked on #111B2A).
@@ -183,7 +183,8 @@ def _comparison(runs: list[dict]) -> None:
 def _empty() -> None:
     render_empty_state(
         "No training runs yet",
-        f"Runs appear here live once scripts/train_ddp.py writes to {training_dir()}/<run_id>/. "
+        f"Runs appear here live once scripts/train_ddp.py writes to {training_dir()}/<run_id>/, or when a finished "
+        f"model folder (final_evaluation.json) is in {models_dir()}/ or {local_models_dir()}/. "
         "How to launch both experiments: docs/TRAINING_GB10.md.",
         icon_name="model_training", compact=True)
 

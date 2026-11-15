@@ -384,7 +384,8 @@ def load_training_run(folder: Path | str) -> dict[str, Any]:
     evaluation, e5 = safe_read_json(d / "final_evaluation.json")
     config, _ = safe_read_json(d / "config.json")
     info = summary or env or {}
-    finished = summary or (evaluation or {}).get("status") == "finished"
+    # "finished", "finished_validation_only", ... (the local trainer records how far evaluation went)
+    finished = summary or str((evaluation or {}).get("status") or "").startswith("finished")
     status = "completed" if finished else ("running" if env or metrics else "empty")
     return {
         "id": d.name,

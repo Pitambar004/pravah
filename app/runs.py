@@ -34,6 +34,11 @@ def models_dir() -> Path:
     return Path(os.environ.get("PRAVAH_MODELS_DIR", str(outputs_dir() / "models")))
 
 
+def local_models_dir() -> Path:
+    """Runs written by the local trainer (scripts/train_local.py → outputs/local_demo/<run>/)."""
+    return Path(os.environ.get("PRAVAH_LOCAL_MODELS_DIR", str(outputs_dir() / "local_demo")))
+
+
 def _signature(root: Path) -> tuple:
     """Changes whenever a run folder is added or rewritten, so the cache never goes stale."""
     if not root.is_dir():
@@ -76,4 +81,5 @@ def run_title(a: RunArtifacts) -> str:
 
 
 def training_runs() -> list[dict]:
-    return load_training_runs(training_dir(), models_dir())  # small files; re-read every refresh so live runs update
+    # small files; re-read every refresh so live runs update
+    return load_training_runs(training_dir(), models_dir(), local_models_dir())
