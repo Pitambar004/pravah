@@ -45,10 +45,13 @@ RULES = {
     "gauge_silent_after_s": 3600, "gauge_recent_s": 6 * 3600,
     "lake_growth_fraction": {"watch": 0.10, "warning": 0.25, "units": "area change vs sensor baseline"},
     "lake_min_change_km2": 0.02, "lake_drain_fraction": 0.30, "lake_min_valid_fraction": 0.80,
+    # A % change is only meaningful when the baseline itself is measurable: 0.02 km² = 50 px at 20 m.
+    "lake_min_baseline_km2": 0.02,
     "glacier_speedup_ratio": {"watch": 2.0, "warning": 3.0, "units": "zone median speed / baseline"},
     "width_anomaly_ratio": {"watch": 1.5, "warning": 2.0, "units": "observed / expected width at current Q"},
     "sar_new_water_km2": {"watch": 0.05, "warning": 0.5, "units": "km² new SAR-dark water in corridor"},
 }
+RULES_VERSION = "2026-11-15.2"   # bump when any rule changes: cached replay frames are rebuilt
 FAMILIES = {"rain": "Rainfall", "seismic": "Seismic", "gauge": "River gauges", "cryosphere": "Glaciers & lakes",
             "river": "River imagery & discharge"}
 

@@ -131,7 +131,7 @@ def lakes(snapshot):
         worst, top = "ok", None
         for r in rows:
             a, b = r.get("area_m2"), r.get("baseline_m2")
-            if a is None or not b:
+            if a is None or not b or b < RULES["lake_min_baseline_km2"] * 1e6:
                 continue
             frac, change_km2 = (a - b) / b, abs(a - b) / 1e6
             s = "ok"

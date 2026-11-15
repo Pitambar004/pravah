@@ -104,12 +104,16 @@ def build_frames(pack: dict, river_model, emulator, baselines: dict, glacier_bas
 def load_or_build(root: Path, river_model, emulator, progress=None) -> dict:
     cache = root / "replay/frames.json"
     pack_path = root / "replay/pack.json"
+    from pravah.watch.config import RULES_VERSION
     if cache.exists() and pack_path.exists() and cache.stat().st_mtime >= pack_path.stat().st_mtime:
-        return json.loads(cache.read_text())
+        cached = json.loads(cache.read_text())
+        if cached.get("rules_version") == RULES_VERSION:
+            return cached
     pack = json.loads(pack_path.read_text())
     lakes = json.loads((root / "baselines/lakes.json").read_text()) if (root / "baselines/lakes.json").exists() else {}
     glac = json.loads((root / "baselines/glacier.json").read_text()) if (root / "baselines/glacier.json").exists() else {}
     out = build_frames(pack, river_model, emulator, lakes, glac, progress=progress)
+    out["rules_version"] = RULES_VERSION
     tmp = cache.with_suffix(".part")
     tmp.write_text(json.dumps(out))
     tmp.replace(cache)

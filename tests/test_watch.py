@@ -437,3 +437,11 @@ def test_nan_station_discharge_is_ignored_and_exposure_is_relative_to_normal_flo
     big = rm.run({"glofas_median": {"UP": 100.0, "DN": 100.0}}, glof=hydro.glof_peak(4e5) | {"origin_chainage_m": 0.0}, month=8)
     assert big["exposure"]["buildings"]["max"] >= out["exposure"]["buildings"]["max"]
     assert big["normal_flow_reference"]["month"] == 8
+
+
+def test_lake_percentage_rule_ignores_unmeasurably_small_baselines():
+    tiny = {"s2": [{"lake_id": "GLO_85.6_28.3", "area_m2": 38000, "baseline_m2": 3000, "acquired_at_utc": NOW.isoformat()}],
+            "s1": [{"lake_id": "GLO_85.7_28.2", "area_m2": 43000, "baseline_m2": 0.0, "acquired_at_utc": NOW.isoformat()}]}
+    a = assess.assess(_snap(lakes=tiny))
+    assert {i["id"]: i["status"] for i in a["indicators"]}["lake_change_s2"] == "ok"
+    assert {i["id"]: i["status"] for i in a["indicators"]}["lake_change_s1"] == "ok"
