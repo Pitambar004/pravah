@@ -1,0 +1,32 @@
+# PRAVAH inference API image (GPU).
+#
+# BASE_IMAGE is REQUIRED and intentionally has no default: it must be an
+# ARM64 (linux/arm64) image with a CUDA-enabled PyTorch that supports the
+# NVIDIA GB10 (Blackwell), verified before use, e.g.
+#     docker buildx imagetools inspect <image:tag>   # must list linux/arm64
+# and then `torch.cuda.is_available()` inside a Team 12 Fuzzball GPU job
+# (workflows/fuzzball/00_gpu_smoke.yaml.tmpl). Record the digest you used.
+# Do not install NVIDIA drivers here; Fuzzball injects host driver libraries.
+#
+#   docker buildx build --platform linux/arm64 -f infra/docker/Dockerfile.api \
+#       --build-arg BASE_IMAGE=<verified-image> -t <registry>/pravah-api:<tag> --push .
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
+    PRAVAH_DATA_ROOT=/data PRAVAH_REQUIRE_CUDA=1
+
+WORKDIR /opt/pravah
+# torch comes from the base image and must not be replaced by a CPU wheel.
+RUN python -c "import torch; print('torch', torch.__version__, 'cuda build', torch.version.cuda)" \
+ && python -c "import torch, sys; sys.exit(0 if torch.version.cuda else 'base image torch has no CUDA build')"
+RUN pip install "fastapi>=0.110" "uvicorn[standard]>=0.29" "rasterio>=1.3" "shapely>=2.0" "pyproj>=3.5" "httpx>=0.25"
+
+COPY pyproject.toml README.md ./
+COPY src ./src
+COPY scripts/fuzzball/gpu_smoke.py ./scripts/fuzzball/gpu_smoke.py
+RUN pip install --no-deps . && python -c "import pravah.api.main, pravah.inference"
+
+# Fuzzball runs workloads unprivileged; code stays world-readable, data lives on /data.
+EXPOSE 8000
+CMD ["python", "-m", "uvicorn", "--factory", "pravah.api.main:create_app", "--host", "0.0.0.0", "--port", "8000"]

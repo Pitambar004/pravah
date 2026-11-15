@@ -30,3 +30,22 @@ benchmarks/raw_logs/
 *.key
 .token
 credentials.json
+
+# Rendered Fuzzball workflows (may contain env values)
+build/
+
+# Satellite / GIS / model artifacts that may appear outside data/ or outputs/
+*.jp2
+*.gpkg
+*.gpkg-journal
+*.npz
+*.safetensors
+*.osm
+*.osm.pbf.md5
+*.tar.gz
+
+# Local secrets and tokens (Streamlit secrets, Fuzzball endpoint tokens, CDSE credentials)
+.streamlit/secrets.toml
+*.token
+.netrc
+.s3cfg

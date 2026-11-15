@@ -1,0 +1,38 @@
+# One-shot GPU inference of one scene with the trained MiniUNet (no web services).
+# Writes /data/outputs/predictions/<RUN_ID>/ which the dashboard reads directly.
+# TEMPLATE — render with scripts/fuzzball/render_workflow.py; NOT validated on v4.3.1 yet.
+version: v4
+
+volumes:
+  dataset:
+    use: "{{VOLUME_PROVISIONER}}"
+    name: "{{VOLUME_NAME}}"
+
+jobs:
+  infer:
+    image:
+      uri: "{{API_IMAGE}}"
+    mounts:
+      /data:
+        volume: dataset
+    command:
+      - python
+      - -m
+      - pravah.inference
+      - --scene
+      - "/data/raw/sentinel2/{{SCENE_ID}}"
+      - --checkpoint
+      - "{{CHECKPOINT}}"
+      - --output-dir
+      - /data/outputs/predictions
+      - --run-id
+      - "{{RUN_ID}}"
+      - --require-cuda
+    resource:
+      cpu:
+        cores: 8
+        affinity: NUMA
+      memory:
+        size: 32GiB
+      devices:
+        nvidia.com/gpu: 1

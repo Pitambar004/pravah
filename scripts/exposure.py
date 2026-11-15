@@ -12,8 +12,8 @@ import geopandas as gpd
 import numpy as np
 import rasterio
 from rasterio.features import shapes
-from shapely.geometry import shape
 from shapely import make_valid
+from shapely.geometry import shape
 
 # Keep the CLI usable directly from a clean checkout, where ``src`` may not
 # have been installed as an editable package yet.
@@ -42,6 +42,43 @@ def _write_geojson(frame: gpd.GeoDataFrame, path: Path) -> None:
         frame.to_file(path, driver="GeoJSON")
 
 
+FEATURE_COLUMNS = ("osm_id", "osm_way_id", "name", "building", "highway", "bridge", "category")
+
+
+def export_feature_layers(water: gpd.GeoDataFrame, vectors: dict[str, gpd.GeoDataFrame | None],
+                          projected_crs: str, out_dir: Path) -> dict[str, int]:
+    """Write exposure_{buildings,roads,bridges}.geojson (EPSG:4326) for the dashboard map.
+
+    Buildings and bridges keep full geometry of features intersecting water; roads are
+    clipped to the water extent with ``clipped_length_m``. Potential exposure only.
+    Categories with no input vector are skipped (not written as empty = "none found").
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    union = water.to_crs(projected_crs).union_all() if not water.empty else None
+    written: dict[str, int] = {}
+    for cat in ("buildings", "roads", "bridges"):
+        frame = vectors.get(cat)
+        if frame is None:
+            continue
+        proj = frame.to_crs(projected_crs)
+        if union is None or union.is_empty:
+            sel = proj.iloc[0:0].copy()
+        else:
+            sel = proj[proj.intersects(union)].copy()
+            if cat == "roads":
+                sel["geometry"] = sel.geometry.intersection(union)
+                sel["clipped_length_m"] = sel.geometry.length.round(1)
+            elif cat == "buildings":
+                sel["intersection_area_m2"] = sel.geometry.intersection(union).area.round(1)
+        keep = [c for c in FEATURE_COLUMNS if c in sel.columns] + \
+            [c for c in ("clipped_length_m", "intersection_area_m2") if c in sel.columns]
+        sel = sel[keep + ["geometry"]]
+        sel["label"] = cat[:-1].capitalize() + " (potential exposure, not damage)"
+        _write_geojson(sel.to_crs("EPSG:4326"), out_dir / f"exposure_{cat}.geojson")
+        written[cat] = len(sel)
+    return written
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mask", required=True, help="GeoTIFF: 0=no water, 1=inferred water, 255=invalid")
@@ -58,6 +95,7 @@ def main() -> int:
     parser.add_argument("--polygons-out", help="water GeoJSON; defaults to exposure.geojson beside --out")
     parser.add_argument("--metadata-out", help="metadata JSON; defaults to exposure_metadata.json beside --out")
     parser.add_argument("--projected-crs", default="EPSG:32645")
+    parser.add_argument("--features-dir", help="Also write exposure_<category>.geojson map layers here")
     args = parser.parse_args()
 
     with rasterio.open(args.mask) as source:
@@ -125,6 +163,10 @@ def main() -> int:
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
     metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     _write_geojson(water, polygons)
+    if args.features_dir:
+        summary["feature_layers_written"] = export_feature_layers(
+            water, vectors, args.projected_crs, Path(args.features_dir))
+        output.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
 

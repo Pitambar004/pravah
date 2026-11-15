@@ -32,6 +32,16 @@ def tag(row, key):
     return None
 
 
+def osm_identifier(row):
+    """Stable OSM id. GDAL's OSM driver stores closed-way polygons under ``osm_way_id``
+    (``osm_id`` is NaN there); ``str(nan or "")`` used to give every such building
+    the id "nan", so exposure de-duplication collapsed ~139k buildings to a handful."""
+    way = tag(row, "osm_way_id")
+    if way:
+        return f"way/{way}"
+    return tag(row, "osm_id") or ""
+
+
 def is_true_tag(row, key):
     value = tag(row, key)
     return bool(value and value.lower() not in ("no", "false", "0"))
@@ -72,7 +82,7 @@ def export(gdf, name, category, attr, destination, bounds):
                 skipped += 1
                 continue
         records.append({
-            "osm_id": str(row.get("osm_id") or ""),
+            "osm_id": osm_identifier(row),
             "name": str(row.get("name") or ""),
             "category": category,
             "osm_value": tag(row, attr) or "" if attr else category,

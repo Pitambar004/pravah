@@ -1,0 +1,95 @@
+# PRAVAH web deployment: GPU inference API + Streamlit dashboard, both on Fuzzball.
+#
+#   browser (venue Wi-Fi) --HTTPS--> Fuzzball endpoint "dashboard" --> dashboard service (CPU)
+#   dashboard --http://api.service:8000 (in-workflow)--> api service (1x GB10, MiniUNet on CUDA)
+#   both services mount the Pravah-Dataset volume at /data
+#
+# Endpoint scope controls who can open the URL: user | group | organization | public.
+# Non-public scopes require a Fuzzball login/token per request; confirm how browsers
+# authenticate on Team 12's v4.3.1 before the demo. With "public", set a dashboard
+# passcode (PRAVAH_DASHBOARD_PASSCODE) via --env.
+# TEMPLATE — render with scripts/fuzzball/render_workflow.py; NOT validated on v4.3.1 yet.
+version: v4
+
+volumes:
+  dataset:
+    use: "{{VOLUME_PROVISIONER}}"
+    name: "{{VOLUME_NAME}}"
+
+services:
+  api:
+    image:
+      uri: "{{API_IMAGE}}"
+    mounts:
+      /data:
+        volume: dataset
+    env:
+      - PRAVAH_DATA_ROOT=/data
+      - PRAVAH_CHECKPOINT={{CHECKPOINT}}
+      - PRAVAH_REQUIRE_CUDA=1
+      - PRAVAH_DEVICE=cuda
+    command: ["python", "-m", "uvicorn", "--factory", "pravah.api.main:create_app", "--host", "0.0.0.0", "--port", "8000"]
+    network:
+      ports:
+        - name: http
+          port: 8000
+          protocol: tcp
+      endpoints:
+        - name: api
+          port-name: http
+          protocol: http
+          type: path
+          scope: "{{ENDPOINT_SCOPE}}"
+    readiness-probe:
+      http-get:
+        path: /health
+        port: 8000
+      initial-delay-seconds: 10
+      period-seconds: 10
+    persist: true
+    resource:
+      cpu:
+        cores: 8
+        affinity: NUMA
+      memory:
+        size: 32GiB
+      devices:
+        nvidia.com/gpu: 1
+
+  dashboard:
+    image:
+      uri: "{{DASHBOARD_IMAGE}}"
+    mounts:
+      /data:
+        volume: dataset
+    env:
+      - PRAVAH_API_URL=http://api.service:8000
+      - PRAVAH_OUTPUTS_DIR=/data/outputs/predictions
+    command: ["sh", "/opt/pravah/scripts/fuzzball/start_dashboard.sh"]
+    network:
+      ports:
+        - name: web
+          port: 8501
+          protocol: tcp
+      endpoints:
+        - name: dashboard
+          port-name: web
+          protocol: http
+          type: path
+          scope: "{{ENDPOINT_SCOPE}}"
+    readiness-probe:
+      tcp-socket:
+        port: 8501
+      initial-delay-seconds: 10
+      period-seconds: 10
+    depends-on:
+      - name: api
+        status: RUNNING
+        description: Dashboard calls the inference API
+    persist: true
+    resource:
+      cpu:
+        cores: 2
+        affinity: NUMA
+      memory:
+        size: 4GiB
