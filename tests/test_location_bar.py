@@ -65,3 +65,54 @@ def test_location_case_study_labels():
     cs = location_case_study(LOC, "2026-11-10T16:45:21.024Z")
     assert cs["scope"] == "live_location" and cs["region"] == "Synthetic Town" and cs["event_date"] == "10 Nov 2026"
     assert location_case_study({**LOC, "place": None}, None)["region"] == "44.5126, -88.0126"
+
+
+def _synthetic_loc_run(root, name, acquired="2026-11-10T16:45:21Z"):
+    """SYNTHETIC searched-place run: UTM 16N grid near the fake place, no real observation."""
+    run = root / name
+    run.mkdir()
+    meta = {"case_study": location_case_study(LOC, acquired), "acquired_at_utc": acquired, "crs": "EPSG:32616",
+            "transform": [10.0, 0.0, 414480.0, 0.0, -10.0, 4934340.0], "raster_width": 1008, "raster_height": 1008}
+    (run / "observed_metadata.json").write_text(json.dumps(meta))
+    return run
+
+
+def test_searched_place_run_never_inherits_rasuwa_aoi_or_context(tmp_path, monkeypatch):
+    from app.data_loader import load_run_artifacts
+    from app.runs import run_role
+
+    monkeypatch.chdir(tmp_path)  # config/aois/aoi_core.geojson stands in for the Rasuwa AOI
+    (tmp_path / "config/aois").mkdir(parents=True)
+    (tmp_path / "config/aois/aoi_core.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {}, "geometry": {"type": "Point", "coordinates": [85.3, 28.1]}}]}))
+    ctx = tmp_path / "context"
+    ctx.mkdir()
+    (ctx / "rivers.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": []}))
+    monkeypatch.setenv("PRAVAH_CONTEXT_DIR", str(ctx))
+
+    a = load_run_artifacts(_synthetic_loc_run(tmp_path, "loc_Synthetic_Town_20261115T000000Z"))
+    assert a.is_other_place and run_role(a) == "other_place" and "rivers" not in a.context_layers
+    ring = a.aoi_geojson["features"][0]["geometry"]["coordinates"][0]
+    lons, lats = [p[0] for p in ring], [p[1] for p in ring]
+    assert min(lons) < LOC["lon"] < max(lons) and min(lats) < LOC["lat"] < max(lats)
+    assert max(lats) - min(lats) == pytest.approx(10.08 / 111.0, rel=0.02)  # 1008 px × 10 m
+
+
+def test_grid_footprint_rejects_missing_grid():
+    from app.data_loader import grid_footprint_geojson
+
+    assert grid_footprint_geojson(None) is None
+    assert grid_footprint_geojson({"crs": "EPSG:32616", "transform": [10, 0, 0, 0, -10, 0]}) is None
+
+
+def test_gallery_place_run_picks_matching_newest(tmp_path):
+    from app.data_loader import load_run_artifacts
+    from app.sections.gallery import place_run
+
+    old = load_run_artifacts(_synthetic_loc_run(tmp_path, "loc_a", "2026-11-01T00:00:00Z"))
+    new = load_run_artifacts(_synthetic_loc_run(tmp_path, "loc_b", "2026-11-10T00:00:00Z"))
+    rasuwa = load_run_artifacts(tmp_path / "absent")
+    assert place_run(PLACE, [old, new], rasuwa) is new
+    assert place_run(PLACE, [old, new], old) is old  # the active run wins
+    assert place_run({**PLACE, "lat": 1.0}, [old, new], rasuwa) is None
+    assert place_run(None, [old, new], rasuwa) is None

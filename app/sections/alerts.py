@@ -63,7 +63,7 @@ def render_alerts_section(ctx: AppContext) -> None:
                "local authorities). Alert levels are illustrative.")
     if ctx.is_synthetic:
         return
-    runs = [r for r in all_runs() if run_role(r) in ("prediction", "post_event", "unknown")]
+    runs = [r for r in all_runs() if run_role(r) in ("prediction", "post_event", "other_place", "unknown")]
     if not runs:
         render_empty_state("Nothing to alert on yet", "Needs a prediction (or a post-event run as a drill) with "
                            "exposure layers.", icon_name="campaign", compact=True)

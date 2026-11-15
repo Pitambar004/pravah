@@ -151,6 +151,8 @@ def test_api_without_checkpoint_refuses_predictions(tmp_path):
     with TestClient(create_app(s)) as c:
         st = c.get("/api/v1/status").json()
         assert st["model_loaded"] is False and "not found" in st["model_error"]
+        assert c.get("/health").status_code == 200
+        assert c.get("/ready").status_code == 503
         r = c.post("/api/v1/predictions", json={"scene_id": "scene.tif"})
         assert r.status_code == 503
 
@@ -161,6 +163,7 @@ def test_api_end_to_end(tmp_path, ckpt):
     write_raster(s.scenes_dir / "sar_like.tif", bands=2, width=32, height=32)
     with TestClient(create_app(s)) as c:
         assert c.get("/health").json() == {"status": "ok"}
+        assert c.get("/ready").json() == {"status": "ready"}
         st = c.get("/api/v1/status").json()
         assert st["model_loaded"] and st["runtime"]["device"] == "cpu" and st["runtime"]["cuda_verified"] is False
         scenes = {x["scene_id"]: x for x in c.get("/api/v1/scenes").json()["scenes"]}

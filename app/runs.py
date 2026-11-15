@@ -1,8 +1,9 @@
 """Index of every run in the outputs folder, with its role relative to the event.
 
 Roles come only from recorded timestamps: a run is ``pre_event`` / ``post_event`` by
-its Sentinel-2 ``acquired_at_utc`` relative to the start of the event day, and a
-``prediction`` when it carries ``prediction_metadata.json``. Nothing is inferred
+its Sentinel-2 ``acquired_at_utc`` relative to the start of the event day, a
+``prediction`` when it carries ``prediction_metadata.json``, and ``other_place`` when its
+``case_study.scope`` puts it outside Rasuwa (searched location or benchmark). Nothing is inferred
 from folder names except a display label.
 """
 from __future__ import annotations
@@ -17,8 +18,9 @@ from app.context import CASE_STUDY
 from app.data_loader import RunArtifacts, load_all_runs, load_training_runs
 
 ROLE_LABELS = {"pre_event": "Before event", "post_event": "After event", "prediction": "Prediction",
-               "unknown": "Undated"}
-ROLE_VARIANTS = {"pre_event": "neutral", "post_event": "accent", "prediction": "warning", "unknown": "neutral"}
+               "other_place": "Searched place", "unknown": "Undated"}
+ROLE_VARIANTS = {"pre_event": "neutral", "post_event": "accent", "prediction": "warning", "other_place": "neutral",
+                 "unknown": "neutral"}
 
 
 def outputs_dir() -> Path:
@@ -59,6 +61,8 @@ def all_runs() -> list[RunArtifacts]:
 def run_role(a: RunArtifacts) -> str:
     if a.is_prediction:
         return "prediction"
+    if a.is_other_place:  # not over Rasuwa: before/after the Rasuwa event does not apply
+        return "other_place"
     acq = a.acquired_at
     if not acq:
         return "unknown"

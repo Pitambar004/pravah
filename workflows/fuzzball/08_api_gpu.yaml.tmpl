@@ -32,6 +32,10 @@ services:
       - PRAVAH_DEVICE=cuda
       - PRAVAH_REQUIRE_CUDA=1
       - PRAVAH_BATCH_SIZE=8
+      # Public provider URLs (same values as .env.example). Set explicitly: python-dotenv is not
+      # installed here, so pravah.configuration cannot read .env files in this job.
+      - PRAVAH_CDSE_SEARCH_URL=https://stac.dataspace.copernicus.eu/v1/search
+      - PRAVAH_GCP_BUCKET_URL=https://storage.googleapis.com/gcp-public-data-sentinel-2/
     script: |
       #!/bin/sh
       set -eu

@@ -184,6 +184,12 @@ def test_private_api_service_stages_checked_model(tmp_path):
     assert [i["source"]["uri"] for i in doc["volumes"]["transfer"]["ingress"]][1] == ck
     assert f'echo "{"b" * 64}  /transfer/in/checkpoint_best.pt" | sha256sum -c -' in api["script"]
     assert "PRAVAH_INPUT_UNITS=reflectance" in api["env"]
+    # Scene fetch needs these; the job has no python-dotenv, so they must be in the service env,
+    # and must match the public defaults in .env.example.
+    example = dict(line.split("=", 1) for line in (TMPL.parents[1] / ".env.example").read_text().splitlines()
+                   if line and not line.startswith("#") and "=" in line)
+    for name in ("PRAVAH_CDSE_SEARCH_URL", "PRAVAH_GCP_BUCKET_URL"):
+        assert f"{name}={example[name]}" in api["env"]
 
 
 @pytest.mark.parametrize("bad", [["--ingress", "https://x/c.pt=c.pt"], ["--ingress", "fb://g/c.pt=../c.pt"],
