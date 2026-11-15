@@ -38,6 +38,7 @@ DEFAULTS = {
     "EPOCHS": "3",
     "MAX_STEPS": "0",
     "MASTER_PORT": "29500",
+    "NUM_WORKERS": "4",
     # World training-data intake (03_download_world, 04_prepare_world)
     "WORLD_ROOT": "/data/training/expanded_20261114",
     "DOWNLOAD_WORKERS": "3",
@@ -85,6 +86,8 @@ def _check_value(key: str, value: str) -> None:
         raise RenderError("RETRY_FAILED must be 0 or 1")
     if key == "INPUT_UNITS" and value not in ("dn", "reflectance"):
         raise RenderError("INPUT_UNITS must be dn or reflectance")
+    if key == "NUM_WORKERS" and not (value.isdigit() and 0 <= int(value) <= 16):
+        raise RenderError("NUM_WORKERS must be an integer 0-16 (DataLoader workers per rank)")
     if key in ("GLOBAL_BATCH", "EPOCHS", "MAX_STEPS", "MASTER_PORT"):
         if not value.isdigit():
             raise RenderError(f"{key} must be a non-negative integer")

@@ -117,7 +117,7 @@ def test_world_training_runs_share_the_same_workload(tmp_path):
     cmd1 = " ".join(one["jobs"]["train-1node"]["command"])
     cmd2 = two["jobs"]["train-2node-ddp"]["script"]
     for flag in (f"--pairs {WORLD}/manifests/optical_supervised.json", "--global-batch-size 8", "--epochs 5",
-                 "--max-steps 100"):
+                 "--max-steps 100", "--num-workers 4"):
         assert flag in cmd1 and flag in " ".join(cmd2.split()), flag
 
 
@@ -198,3 +198,9 @@ def test_private_api_rejects_bad_inputs(tmp_path, bad):
     args = [str(TMPL / "08_api_gpu.yaml.tmpl"), *IMG, "--bundle", "fb://group/pravah/b.tar.gz", "--bundle-sha256", SHA,
             "--set", f"CHECKPOINT_SHA256={'b' * 64}", *bad, "--out", str(tmp_path / "x.yaml")]
     assert rw.main(args) == 2
+
+
+@pytest.mark.parametrize("bad", ["NUM_WORKERS=-1", "NUM_WORKERS=17", "NUM_WORKERS=two"])
+def test_num_workers_is_validated(tmp_path, bad):
+    assert rw.main([str(TMPL / "05_train_1node.yaml.tmpl"), *IMG, "--set", "RUN_ID=x", "--set", bad,
+                    "--out", str(tmp_path / "x.yaml")]) == 2

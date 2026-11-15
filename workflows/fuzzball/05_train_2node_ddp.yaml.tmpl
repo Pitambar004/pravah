@@ -34,7 +34,7 @@ jobs:
         --master-addr=$MULTINODE_NODE_IP --master-port={{MASTER_PORT}} \
         /opt/pravah/scripts/train_ddp.py --pairs {{PAIRS}} \
         --output-dir /data/outputs/training/{{RUN_ID}} --device cuda \
-        --global-batch-size {{GLOBAL_BATCH}} --epochs {{EPOCHS}} --max-steps {{MAX_STEPS}} \
+        --global-batch-size {{GLOBAL_BATCH}} --epochs {{EPOCHS}} --max-steps {{MAX_STEPS}} --num-workers {{NUM_WORKERS}} \
         --run-label {{RUN_ID}}"
     resource:
       cpu:

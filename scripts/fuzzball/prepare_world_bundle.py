@@ -5,7 +5,7 @@ No Docker or registry needed: jobs run on the stock NVIDIA image and fetch this 
 Fuzzball object store (same route as scripts/fuzzball_morning.py). The bundle is `git archive` of the
 committed HEAD, so it is reproducible; uncommitted changes to bundled paths are refused.
 
-    .venv/bin/python scripts/fuzzball/prepare_world_bundle.py [--epochs 3 --max-steps 0 --global-batch 8]
+    .venv/bin/python scripts/fuzzball/prepare_world_bundle.py [--epochs 3 --max-steps 0 --global-batch 8 --num-workers 4]
 
 Writes build/fuzzball/world_<tag>/{bundle.tar.gz, 1_download_world.yaml, 2_prepare_world.yaml,
 3a_train_1node.yaml, 3b_train_2node.yaml, COMMANDS.sh}. Not validated on Fuzzball v4.3.1 yet.
@@ -37,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--epochs", default="3")
     p.add_argument("--max-steps", default="0")
     p.add_argument("--global-batch", default="8")
+    p.add_argument("--num-workers", default="4", help="DataLoader workers per rank (job has 8 cores)")
     p.add_argument("--object-root", default="fb://group/pravah/world")
     p.add_argument("--allow-uncommitted", action="store_true",
                    help="Build from HEAD anyway; uncommitted changes listed below are NOT in the bundle")
@@ -67,7 +68,7 @@ def main(argv: list[str] | None = None) -> int:
     for template, name, sets, run_id in renders:
         if run_id:
             sets = [f"PAIRS={MANIFEST}", f"RUN_ID={run_id}", f"GLOBAL_BATCH={args.global_batch}",
-                    f"EPOCHS={args.epochs}", f"MAX_STEPS={args.max_steps}"]
+                    f"EPOCHS={args.epochs}", f"MAX_STEPS={args.max_steps}", f"NUM_WORKERS={args.num_workers}"]
         cmd = [sys.executable, str(ROOT / "scripts/fuzzball/render_workflow.py"), str(ROOT / "workflows/fuzzball" / template),
                "--set", f"API_IMAGE={STOCK}", "--bundle", uri, "--bundle-sha256", sha, "--results-prefix", prefix,
                "--out", str(out / name)]

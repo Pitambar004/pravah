@@ -1,6 +1,6 @@
 # Experiment A — baseline U-Net training on ONE Team 12 GB10 (1 GPU, WORLD_SIZE=1).
 # Launched through torchrun like the 2-node run so launcher overhead is comparable.
-# Keep GLOBAL_BATCH / EPOCHS / MAX_STEPS / PAIRS identical to 05_train_2node_ddp for a fair comparison.
+# Keep GLOBAL_BATCH / EPOCHS / MAX_STEPS / NUM_WORKERS / PAIRS identical to 05_train_2node_ddp for a fair comparison.
 # Writes /data/outputs/training/<RUN_ID>/ (train_metrics.csv, training_summary.json, checkpoint_last.pt);
 # the dashboard "Model Training" page reads that folder live (PRAVAH_TRAINING_DIR).
 # TEMPLATE — render with scripts/fuzzball/render_workflow.py; NOT validated on v4.3.1 yet.
@@ -37,6 +37,8 @@ jobs:
       - "{{EPOCHS}}"
       - --max-steps
       - "{{MAX_STEPS}}"
+      - --num-workers
+      - "{{NUM_WORKERS}}"
       - --run-label
       - "{{RUN_ID}}"
     resource:
