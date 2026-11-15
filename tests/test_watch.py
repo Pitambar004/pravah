@@ -333,3 +333,71 @@ def test_watch_page_renders_live_and_replay_from_synthetic_api(tmp_path, monkeyp
     at.session_state["pv_watch_mode"] = "Rasuwa 26 Aug 2026 replay"
     at.run()
     assert not at.exception, at.exception
+
+
+def test_source_fetchers_against_mocked_providers(tmp_path, monkeypatch):
+    """Exercise URL formatting and response parsing of every watch source with fake (synthetic) payloads."""
+    import httpx
+
+    from pravah.watch import sources
+    seen = []
+
+    def handler(req: httpx.Request):
+        seen.append(str(req.url))
+        u = str(req.url)
+        if "copernicus-dem" in u:
+            return httpx.Response(404 if "E083" in u else 200, content=b"tif")
+        if "archive" in u:
+            n = len(req.url.params["latitude"].split(","))
+            if "hourly" in req.url.params:
+                one = {"hourly": {"time": ["2026-08-11T00:00"], "precipitation": [1.0], "temperature_2m": [5.0]}}
+            else:
+                one = {"daily": {"time": ["2020-01-01", "2020-01-02"], "precipitation_sum": [1.0, None], "temperature_2m_mean": [3.0, 4.0]}}
+            return httpx.Response(200, json=[one] * n if n > 1 else one)
+        if "flood" in u:
+            n = len(req.url.params["latitude"].split(","))
+            daily = {"time": ["2020-01-01", "2020-01-02"], "river_discharge": [10.0, 12.0],
+                     "river_discharge_median": [10.0, 12.0], "river_discharge_max": [20.0, 22.0], "river_discharge_min": [5.0, 6.0]}
+            return httpx.Response(200, json=[{"daily": daily}] * n if n > 1 else {"daily": daily})
+        if "earthquake" in u:
+            return httpx.Response(200, json={"features": [{"id": "x", "properties": {"place": "p", "mag": 4.6, "type": "earthquake", "time": 1786000000000},
+                                                           "geometry": {"coordinates": [85.3, 28.2, 10]}}]})
+        if "api.open-meteo.com" in u:
+            n = len(req.url.params["latitude"].split(","))
+            one = {"hourly": {"time": ["2026-11-15T00:00"], "precipitation": [0.5]},
+                   "daily": {"time": ["2026-11-15"], "precipitation_sum": [2.0], "temperature_2m_mean": [6.0]}}
+            return httpx.Response(200, json=[one] * n)
+        return httpx.Response(500)
+
+    real = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda *a, **kw: real(*a, **{**kw, "transport": httpx.MockTransport(handler)}))
+    monkeypatch.setattr(sources.time, "sleep", lambda s: None)
+    tiles = sources.download_dem((83.5, 27.5, 85.2, 28.2), tmp_path / "dem")
+    assert {t["tile"] for t in tiles} == {"Copernicus_DSM_COG_10_N27_00_E084_00_DEM", "Copernicus_DSM_COG_10_N27_00_E085_00_DEM",
+                                          "Copernicus_DSM_COG_10_N28_00_E084_00_DEM", "Copernicus_DSM_COG_10_N28_00_E085_00_DEM"}
+    assert any(u.endswith("Copernicus_DSM_COG_10_N28_00_E085_00_DEM/Copernicus_DSM_COG_10_N28_00_E085_00_DEM.tif") for u in seen)
+    era = sources.era5_daily(date(2020, 1, 1), date(2020, 1, 2))
+    assert len(era["precip"][0]) == len(era["points"]) and era["precip"][1][0] is None
+    assert len(sources.era5_hourly(date(2026, 8, 11), date(2026, 8, 11))["precip"]) == 1
+    cells = [{"station_id": "A", "cell_latitude": 28.0, "cell_longitude": 85.0}, {"station_id": "B", "cell_latitude": 27.9, "cell_longitude": 85.1}]
+    g = sources.glofas_daily(cells, date(2020, 1, 1), date(2020, 1, 2), ensemble=True)
+    assert g["discharge"] == [[10.0, 10.0], [12.0, 12.0]] and g["river_discharge_max"][0] == [20.0, 20.0]
+    assert sources.usgs_events(NOW - timedelta(days=1), NOW)[0]["magnitude"] == 4.6
+    fc = sources.forecast_rain()
+    assert fc["precip"][0][0] == 2.0 and len(fc["hourly_precip"][0]) == len(fc["points"])
+
+
+def test_build_history_step_merges_sources(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from pravah.watch import build
+    days = ["2020-01-01", "2020-01-02", "2020-01-03"]
+    monkeypatch.setattr(build.sources, "era5_daily", lambda s, e: {"days": days, "precip": [[1, None]] * 3, "temp": [[2, 3]] * 3,
+                                                                    "points": ["a", "b"], "provenance": []})
+    monkeypatch.setattr(build.sources, "glofas_daily", lambda c, s, e: {"days": days[1:], "discharge": [[5.0], [None]], "stations": ["S"], "provenance": []})
+    (tmp_path / "assets/forecast").mkdir(parents=True)
+    (tmp_path / "assets/forecast/glofas_cells.json").write_text(json.dumps({"stations": [{"station_id": "S"}]}))
+    monkeypatch.setenv("PRAVAH_WATCH_ASSETS", str(tmp_path / "assets"))
+    r = build.step_history(tmp_path / "out", SimpleNamespace())
+    t = json.loads((tmp_path / "out/history/table.json").read_text())
+    assert r["days"] == 2 and t["precip"][0] == [1, 0] and t["discharge"] == [[5.0], [None]]

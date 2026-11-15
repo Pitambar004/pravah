@@ -139,7 +139,7 @@ def download_dem(bbox, dest: Path) -> list[dict]:
         for name in dem_tiles(bbox):
             path = dest / f"{name}.tif"
             if not path.exists():
-                r = c.get(configured_url("PRAVAH_COP_DEM_TILE_URL", name=name))
+                r = c.get(configured_url("PRAVAH_COP_DEM_TILE_URL", tile=name))
                 if r.status_code == 404:       # ocean / missing tile
                     continue
                 r.raise_for_status()
