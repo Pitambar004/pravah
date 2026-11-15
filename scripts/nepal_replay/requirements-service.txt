@@ -1,0 +1,16 @@
+# Versions installed and tested on the Mac; Linux/ARM64 container resolution remains to be tested.
+# torch is supplied by the verified CUDA base image and must not be replaced.
+fastapi==0.163.0
+uvicorn==0.54.0
+rasterio==1.5.2
+affine==3.0.1
+numpy==2.5.4
+pandas==3.1.1
+geopandas==1.2.0
+shapely==2.2.0
+pyproj==3.8.0
+httpx==0.28.1
+pillow==13.0.0
+streamlit==1.67.0
+folium==0.20.0
+osm2geojson==0.3.2

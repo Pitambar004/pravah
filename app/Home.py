@@ -53,6 +53,7 @@ PAGES = [
     st.Page("views/overview.py", title="Overview", icon=":material/space_dashboard:", url_path="overview", default=True),
     st.Page("views/flood_map.py", title="Flood Intelligence Map", icon=":material/map:", url_path="map"),
     st.Page("views/replay.py", title="Historical Replay", icon=":material/history:", url_path="replay"),
+    st.Page("views/experiment.py", title="Nepal Experiment", icon=":material/science:", url_path="experiment"),
     st.Page("views/exposure.py", title="Infrastructure Exposure", icon=":material/apartment:", url_path="exposure"),
     st.Page("views/inference.py", title="Run Inference", icon=":material/play_circle:", url_path="inference"),
     st.Page("views/environment.py", title="Nepal Data", icon=":material/landscape:", url_path="environment"),
