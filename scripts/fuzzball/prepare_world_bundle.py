@@ -38,12 +38,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--max-steps", default="0")
     p.add_argument("--global-batch", default="8")
     p.add_argument("--object-root", default="fb://group/pravah/world")
+    p.add_argument("--allow-uncommitted", action="store_true",
+                   help="Build from HEAD anyway; uncommitted changes listed below are NOT in the bundle")
     args = p.parse_args(argv)
 
     dirty = git("status", "--porcelain", "--", *BUNDLED).strip()
-    if dirty:
+    if dirty and not args.allow_uncommitted:
         print("Commit these bundled paths first (the bundle is built from HEAD):\n" + dirty, file=sys.stderr)
         return 2
+    if dirty:
+        print("WARNING: bundle is HEAD only; these uncommitted changes are NOT included:\n" + dirty, file=sys.stderr)
     out = ROOT / "build/fuzzball" / f"world_{args.tag}"
     out.mkdir(parents=True, exist_ok=True)
     bundle = out / "bundle.tar.gz"
