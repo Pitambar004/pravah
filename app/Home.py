@@ -61,6 +61,7 @@ PAGES = [
     st.Page("views/validation.py", title="Prediction vs Reality", icon=":material/fact_check:", url_path="validation"),
     st.Page("views/gallery.py", title="Maps", icon=":material/map:", url_path="maps"),
     st.Page("views/live.py", title="Live Prediction", icon=":material/sensors:", url_path="live"),
+    st.Page("views/outlook.py", title="River Outlook", icon=":material/waves:", url_path="outlook"),
     st.Page("views/alerts.py", title="Alerts", icon=":material/campaign:", url_path="alerts"),
     st.Page("views/training.py", title="Training", icon=":material/model_training:", url_path="training"),
 ]
