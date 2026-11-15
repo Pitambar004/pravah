@@ -11,6 +11,7 @@ from html import escape
 import streamlit as st
 
 from app.components.compare_map import MapSide, render_compare_map
+from app.components.context_layers import with_downloaded_context
 from app.components.empty_state import render_empty_state
 from app.components.layout import render_callout, render_section_header
 from app.components.map_view import (
@@ -58,8 +59,9 @@ def _no_prediction(runs: list[RunArtifacts]) -> None:
         pre, post = pair
         render_section_header("What the model has to predict", "Water before vs after the event · maps move together")
         render_compare_map(
-            MapSide("Before", short_run_label(pre.run_id), run_layers(pre, "pre"), "Satellite"),
-            MapSide("After", short_run_label(post.run_id), run_layers(post, "post"), "Satellite"), height=520)
+            MapSide("Before", short_run_label(pre.run_id), with_downloaded_context(run_layers(pre, "pre"), light=True), "Satellite"),
+            MapSide("After", short_run_label(post.run_id), with_downloaded_context(run_layers(post, "post"), light=True),
+                    "Satellite"), height=520)
 
 
 def _verdict(v: dict) -> None:
@@ -166,11 +168,12 @@ def render_validation_section(ctx: AppContext) -> None:
             right.append(lyr)
     render_section_header("Predicted vs observed", "Maps move together")
     render_compare_map(
-        MapSide("Predicted", f"inputs up to {pm.get('input_cutoff_utc') or '—'}", prediction_layers(p)[:1], "Model"),
-        MapSide("Observed after the event", ", ".join(short_run_label(r.run_id) for r in refs), right, "Satellite"),
+        MapSide("Predicted", f"inputs up to {pm.get('input_cutoff_utc') or '—'}", with_downloaded_context(prediction_layers(p)[:1], light=True), "Model"),
+        MapSide("Observed after the event", ", ".join(short_run_label(r.run_id) for r in refs),
+                with_downloaded_context(right, light=True), "Satellite"),
         height=520)
     render_section_header("Right and wrong", "Green = correctly predicted · amber = false alarm · red = missed")
     context = [lyr for lyr in build_layers(ctx.artifacts, show_retrospective=False)
                if lyr.group == "Geographic context"]
-    render_map_workspace(context + prediction_layers(p), height=560, mode="full")
+    render_map_workspace(with_downloaded_context(context + prediction_layers(p)), height=560, mode="full")
     _details(pm, v)

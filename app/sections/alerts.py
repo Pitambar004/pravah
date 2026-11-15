@@ -11,6 +11,7 @@ from pathlib import Path
 
 import streamlit as st
 
+from app.components.context_layers import with_downloaded_context
 from app.components.empty_state import render_empty_state
 from app.components.layout import render_badge
 from app.components.map_view import (
@@ -111,7 +112,7 @@ def render_alerts_section(ctx: AppContext) -> None:
                               description="Settlements with exposed buildings at or above the Advisory level.",
                               limitation="Illustrative levels; not an official warning.",
                               unavailable_reason="No settlement reaches an alert level"))
-    render_map_workspace(layers, height=560, mode="full")
+    render_map_workspace(with_downloaded_context(layers), height=560, mode="full")
 
     if alerted:
         left, right = st.columns([3, 2])

@@ -8,6 +8,7 @@ from __future__ import annotations
 import streamlit as st
 
 from app.components.compare_map import MapSide, render_compare_map
+from app.components.context_layers import with_downloaded_context
 from app.components.empty_state import render_empty_state
 from app.components.layout import render_section_header
 from app.components.map_view import (
@@ -45,9 +46,11 @@ def render_gallery_section(ctx: AppContext) -> None:
             pre_id = st.selectbox("Before", pre_ids, format_func=short_run_label, key=f"pv_ba_pre_{post_id}",
                                   index=pre_ids.index(paired) if paired in pre_ids else 0)
         pre, post = by_id[pre_id], by_id[post_id]
-        render_compare_map(MapSide("Before", short_run_label(pre_id), run_layers(pre, "pre"), "Satellite"),
-                           MapSide("After", short_run_label(post_id), run_layers(post, "post"), "Satellite"),
+        render_compare_map(MapSide("Before", short_run_label(pre_id), with_downloaded_context(run_layers(pre, "pre"), light=True),
+                                   "Satellite"),
+                           MapSide("After", short_run_label(post_id), with_downloaded_context(run_layers(post, "post"), light=True),
+                                   "Satellite"),
                            height=520)
 
     render_section_header("Every run", f"{len(runs)} runs · one layer group each · toggle in the layer panel")
-    render_map_workspace(build_multi_run_layers(runs, ctx.artifacts, run_title), height=620, mode="full")
+    render_map_workspace(with_downloaded_context(build_multi_run_layers(runs, ctx.artifacts, run_title)), height=620, mode="full")

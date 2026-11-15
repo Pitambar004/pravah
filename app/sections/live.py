@@ -16,6 +16,7 @@ from pathlib import Path
 import streamlit as st
 
 from app import api_client
+from app.components.context_layers import with_downloaded_context
 from app.components.layout import card, html, render_badge, status_list
 from app.components.map_view import build_layers, render_map_workspace
 from app.context import AppContext, render_page_frame
@@ -138,7 +139,7 @@ def _live_body(height: int) -> None:
          f'{render_badge("Live", "success", dot=True)}<b>{escape(run_title(a))}</b>'
          f'<span style="color:var(--pv-text-muted);font-size:12px">{escape(str(model))} · '
          f'{escape(source)} · checked {now}</span></div>')
-    render_map_workspace(build_layers(a, show_retrospective=False), height=height, mode="full")
+    render_map_workspace(with_downloaded_context(build_layers(a, show_retrospective=False)), height=height, mode="full")
 
 
 def render_live_section(ctx: AppContext) -> None:
