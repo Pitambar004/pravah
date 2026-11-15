@@ -128,3 +128,44 @@ def test_pinned_world_plan_matches_its_checksum():
     plan = ROOT / "config/training/world_download_plan.json.gz"
     expected = (ROOT / "config/training/world_download_plan.json.sha256").read_text().split()[0]
     assert hashlib.sha256(gzip.decompress(plan.read_bytes())).hexdigest() == expected
+
+
+SHA = "a" * 64
+
+
+def test_bundle_mode_runs_repo_code_on_stock_image(tmp_path):
+    uri, prefix = "fb://group/pravah/world/t/bundle.tar.gz", "fb://group/pravah/world/t"
+    common = ["--bundle", uri, "--bundle-sha256", SHA, "--results-prefix", prefix]
+
+    def render(name, *sets):
+        out = tmp_path / (name + ".yaml")
+        args = [str(TMPL / name), *IMG, *common, "--out", str(out)]
+        for s in sets:
+            args += ["--set", s]
+        assert rw.main(args) == 0
+        return yaml.safe_load(out.read_text())
+
+    pairs = f"PAIRS={WORLD}/manifests/optical_supervised.json"
+    dl = render("03_download_world.yaml.tmpl")
+    one = render("05_train_1node.yaml.tmpl", pairs, "RUN_ID=world_1node_t")
+    two = render("05_train_2node_ddp.yaml.tmpl", pairs, "RUN_ID=world_2node_t")
+    for doc in (dl, one, two):
+        job = next(iter(doc["jobs"].values()))
+        assert job["image"]["uri"] == rw.BUNDLE_IMAGE and "/opt/pravah" not in job["script"]
+        assert f'echo "{SHA}  /transfer/in/bundle.tar.gz" | sha256sum -c -' in job["script"]
+        assert doc["volumes"]["transfer"]["ingress"][0]["source"]["uri"] == uri
+        assert job["mounts"]["/transfer"] == {"volume": "transfer"}
+    assert "rasterio==1.5.2" not in dl["jobs"]["download-world"]["script"]  # stdlib-only job
+    s1 = one["jobs"]["train-1node"]["script"]
+    assert "command" not in one["jobs"]["train-1node"] and "rasterio==1.5.2" in s1 and "$CODE/scripts/train_ddp.py" in s1
+    assert one["volumes"]["transfer"]["egress"][0]["destination"]["uri"] == f"{prefix}/world_1node_t.tar.gz"
+    s2 = two["jobs"]["train-2node-ddp"]["script"]
+    assert 'exec_all "(cd' in s2 and "PYTHONPATH=$CODE/src torchrun" in s2  # every node installs + sees code
+
+
+@pytest.mark.parametrize("bad", [["--bundle", "https://x/b.tar.gz", "--bundle-sha256", SHA],
+                                 ["--bundle", "fb://group/pravah/b.zip", "--bundle-sha256", SHA],
+                                 ["--bundle", "fb://group/pravah/b.tar.gz", "--bundle-sha256", "abc"],
+                                 ["--bundle", "fb://group/pravah/b.tar.gz"]])
+def test_bundle_mode_rejects_bad_inputs(tmp_path, bad):
+    assert rw.main([str(TMPL / "03_download_world.yaml.tmpl"), *IMG, *bad, "--out", str(tmp_path / "x.yaml")]) == 2

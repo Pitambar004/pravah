@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import shlex
 import sys
 from pathlib import Path
 from typing import Any
@@ -148,6 +149,66 @@ def apply_extras(doc: dict[str, Any], image_secret: str | None, env: dict[str, l
             u["env"] = [e for e in u.get("env") or [] if e.split("=", 1)[0] not in keys] + extra
 
 
+
+# --- Bundle mode: stock NVIDIA image + code bundle from the Fuzzball object store (no registry) -------
+BUNDLE_IMAGE = "docker://nvcr.io/nvidia/pytorch:25.10-py3"  # recorded as torch 2.9.0a0+nv25.10 on Team 12 GB10
+WHEELS = "/data/training/expanded_20261114/environment/wheels"  # checksum-listed rasterio/affine wheels
+INSTALL = (f'(cd {WHEELS} && sha256sum -c --quiet SHA256SUMS) && python -m pip install --disable-pip-version-check '
+           f'--no-index --no-deps --find-links {WHEELS} rasterio==1.5.2 affine==3.0.1 >/dev/null')
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
+FB_URI = re.compile(r"^fb://[A-Za-z0-9_./-]+$")
+
+
+def apply_bundle(doc: dict[str, Any], uri: str, sha: str, results: str | None, run_id: str | None) -> None:
+    """Rewrite every job to run the repo code from a checksum-verified bundle on the stock image."""
+    if not FB_URI.match(uri) or not uri.endswith(".tar.gz"):
+        raise RenderError("--bundle must be an fb://... .tar.gz object URI")
+    if not SHA256.match(sha):
+        raise RenderError("--bundle-sha256 must be 64 lowercase hex characters")
+    if results is not None and not FB_URI.match(results):
+        raise RenderError("--results-prefix must be an fb://... URI")
+    code = f"/data/pravah_code/{sha[:16]}"
+    transfer = {"use": "ephemeral", "size": "2GiB",
+                "ingress": [{"source": {"uri": uri}, "destination": {"uri": "file://in/bundle.tar.gz"}}]}
+    boot = "\n".join([
+        "#!/bin/sh", "set -eu", f"CODE={code}",
+        'if [ "$(cat "$CODE/.bundle_sha256" 2>/dev/null)" != "' + sha + '" ]; then',
+        f'  echo "{sha}  /transfer/in/bundle.tar.gz" | sha256sum -c -',
+        '  TMP="$CODE.tmp.$$"; rm -rf "$TMP"; mkdir -p "$TMP"',
+        '  tar -xzf /transfer/in/bundle.tar.gz --no-same-owner -C "$TMP"',
+        f'  echo {sha} > "$TMP/.bundle_sha256"',
+        '  mkdir -p "$(dirname "$CODE")"; rm -rf "$CODE"; mv "$TMP" "$CODE"',
+        "fi",
+        'export PYTHONPATH="$CODE/src"', ""])
+    units = {**(doc.get("jobs") or {}), **(doc.get("services") or {})}
+    for u in units.values():
+        u["image"] = {"uri": BUNDLE_IMAGE}
+        u.setdefault("mounts", {})["/transfer"] = {"volume": "transfer"}
+        if "command" in u:
+            body = " ".join(shlex.quote(str(c)) for c in u.pop("command"))
+        else:
+            body = u.get("script", "")
+            body = body.split("\n", 1)[1] if body.startswith("#!") else body
+            body = body.replace("set -eu\n", "", 1)
+        body = body.replace("/opt/pravah", "$CODE")
+        needs_raster = "train_ddp.py" in body or "download_training_prepare.py" in body
+        if "exec_all" in body:  # every node needs the wheels and the code path
+            body = body.replace('exec_all "torchrun', f'exec_all "{INSTALL} && PYTHONPATH=$CODE/src torchrun')
+        elif needs_raster:
+            body = INSTALL + "\n" + body
+        tail = ""
+        if results and run_id and f"/data/outputs/training/{run_id}" in body:
+            transfer.setdefault("egress", []).append(
+                {"source": {"uri": f"file://out/{run_id}.tar.gz"}, "destination": {"uri": f"{results}/{run_id}.tar.gz"}})
+            tail = ("\nfinish() { code=$?; trap - EXIT; mkdir -p /transfer/out; "
+                    f"tar -czf /transfer/out/{run_id}.tar.gz -C /data/outputs/training {run_id} || true; exit $code; }}")
+            boot_job = boot + tail.lstrip("\n") + "\ntrap finish EXIT\n"
+        else:
+            boot_job = boot
+        u["script"] = boot_job + body.strip() + "\n"
+    doc.setdefault("volumes", {})["transfer"] = transfer
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("template", type=Path)
@@ -156,6 +217,9 @@ def main(argv: list[str] | None = None) -> int:
                    help="Extra env for a job/service ('*' = all), e.g. api:PRAVAH_API_TOKEN=...")
     p.add_argument("--image-secret", default=None, help="Fuzzball secret ref for a private registry")
     p.add_argument("--out", type=Path, default=None)
+    p.add_argument("--bundle", default=None, help="fb://.../bundle.tar.gz: run on the stock NVIDIA image from this code bundle")
+    p.add_argument("--bundle-sha256", default=None, help="SHA-256 of the bundle (required with --bundle)")
+    p.add_argument("--results-prefix", default=None, help="fb://... prefix that training jobs egress their run folder to")
     args = p.parse_args(argv)
     try:
         values = dict(kv.split("=", 1) for kv in args.set)
@@ -169,6 +233,10 @@ def main(argv: list[str] | None = None) -> int:
             env.setdefault(unit, []).append(kv)
         doc = yaml.safe_load(render(args.template.read_text(), values))
         apply_extras(doc, args.image_secret, env)
+        if args.bundle:
+            if not args.bundle_sha256:
+                raise RenderError("--bundle requires --bundle-sha256")
+            apply_bundle(doc, args.bundle, args.bundle_sha256, args.results_prefix, values.get("RUN_ID"))
         notes = validate(doc)
     except (RenderError, ValueError, yaml.YAMLError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
