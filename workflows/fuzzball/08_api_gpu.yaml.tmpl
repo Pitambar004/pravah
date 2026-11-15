@@ -38,7 +38,7 @@ services:
       WHEELS=/data/training/expanded_20261114/environment/wheels
       (cd "$WHEELS" && sha256sum -c --quiet SHA256SUMS)
       python -m pip install --disable-pip-version-check --no-index --no-deps --find-links "$WHEELS" rasterio==1.5.2 affine==3.0.1 >/dev/null
-      python -m pip install --disable-pip-version-check "fastapi>=0.110" "uvicorn>=0.29" "shapely>=2.0" "httpx>=0.25" >/dev/null
+      python -m pip install --disable-pip-version-check "fastapi>=0.110" "uvicorn>=0.29" "shapely>=2.0" "httpx>=0.25" "pyproj>=3.5" "geopandas>=0.14" >/dev/null
       # Stage the model once onto the volume, refusing anything but the expected checkpoint.
       mkdir -p "{{MODEL_DIR}}" /data/outputs/predictions
       if [ ! -s "{{MODEL_DIR}}/checkpoint_best.pt" ]; then
